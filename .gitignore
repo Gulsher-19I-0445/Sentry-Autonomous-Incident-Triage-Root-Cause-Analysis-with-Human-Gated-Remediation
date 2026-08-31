@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------- deployment
+# Lambda bundles — rebuilt from src/ on every deploy, never committed
+*.zip
+ziptest/
+resources.txt
+manual-setup.md
+cli-reference.md
+e2e_run.json
+# ---------------------------------------------------------------- terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfstate.d/
+crash.log
+tfplan*
+# real values (account ids, tokens); keep the .example files
+*.tfvars
+!*.tfvars.example
+
+# ---------------------------------------------------------------- secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+# GitHub PAT, admin tokens — anything local-only
+local-config.*
+
+# ---------------------------------------------------------------- eval output
+# Raw sweep output. Comment this out once you are producing results worth
+# keeping for the report — they are the raw data for the calibration analysis.
+eval-results.json
+eval-results-*.json
+evals/fixtures/*.local.json
+
+# ---------------------------------------------------------------- scratch
+# CLI scratch files from the aws cli invoke/get-content loop
+out.json
+out-*.json
+body.json
+trace.json
+resp.json
+fnresp.json
+response.json
+*.local.*
+
+# ---------------------------------------------------------------- python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ---------------------------------------------------------------- frontend
+node_modules/
+.next/
+.amplify/
+frontend/dist/
+frontend/build/
+
+# ---------------------------------------------------------------- editors / os
+.vscode/
+!.vscode/settings.json.example
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
