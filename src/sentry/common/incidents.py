@@ -55,8 +55,13 @@ ALLOWED_TRANSITIONS: dict[Status, set[Status]]={
 }
 
 
-class IllegalTransition:
-    pass
+class IllegalTransition(Exception):
+    """Raised when a transition is not permitted from the current status.
+
+    Must subclass Exception: `raise IllegalTransition(...)` on a plain class
+    fails with "TypeError: exceptions must derive from BaseException", which
+    replaces a precise error with a confusing one on the path that matters most.
+    """
 
 class DuplicateIncident(Exception):
     """Raised when this alarm+window already has an incident. Expected, not an error."""
