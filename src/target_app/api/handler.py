@@ -48,8 +48,14 @@ def handler(event: dict, context) -> dict:
     )
     method, path = _route(event)
 
+    # Admin paths are redacted for the same reason the arming call is not logged:
+    # "/admin/chaos/bad_payload" in the API log group tells the agent the failure
+    # is injected and names the scenario. Request volume is still visible, which
+    # is the only part of this line that is legitimate evidence.
     log_event(logger, "info", "request received",
-              method=method, path=path, request_id=context.aws_request_id)
+              method=method,
+              path="/admin" if path.startswith("/admin/") else path,
+              request_id=context.aws_request_id)
 
     try:
         # Admin routes bypass chaos so you can always disarm.
@@ -130,10 +136,14 @@ def _handle_admin(method: str, path: str, event: dict) -> dict:
             remaining=int(body.get("remaining", 5)),
             scenario=_internal.MODES[mode]["scenario"],
         )
-        # Armed state is logged for YOUR audit trail, never for the agent:
-        # keep this out of the agent's queryable log groups.
-        log_event(logger, "info", "chaos armed", mode=mode,
-                  scenario=_internal.MODES[mode]["scenario"])
+        # Deliberately NOT logged. Anything this function writes to stdout lands
+        # in /aws/lambda/sentry-capstone-api-gulsher, which is one of the log
+        # groups the agent queries — so an "armed" line here hands the agent both
+        # the answer and the fact that the failure is synthetic, which is exactly
+        # what invalidated an earlier evaluation run.
+        #
+        # The audit trail is the response below plus the flag row in DynamoDB
+        # (which the agent has no tool to read).
         return _response(200, {"armed": mode, "flag": flag})
 
     return _response(404, {"error": "not found"})
