@@ -150,6 +150,12 @@ SCHEMA_DESCRIPTION = """Respond with a single JSON object, no prose around it:
 Rules:
 - Never conclude without evidence. If the evidence is insufficient, use
   "unknown", set needs_human_investigation to true, and explain what is missing.
+- needs_human_investigation means YOU COULD NOT DETERMINE THE CAUSE. It does not
+  mean "a human should review this" — every remediation is reviewed and approved
+  by a human before it runs, so that is always true and never worth reporting.
+  If you identified the cause, set it to false and propose the remediation.
+  Setting it true while also proposing a remediation is contradictory and will
+  be rejected: either you know the fix or you do not.
 - A deploy happening near the incident is NOT by itself evidence that it caused
   the incident. Say so, and set suspect_change to null, unless the logs or
   metrics actually connect the change to the failure.

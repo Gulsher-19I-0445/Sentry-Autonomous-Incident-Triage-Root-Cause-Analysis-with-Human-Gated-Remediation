@@ -41,6 +41,21 @@ class Config:
         ).split(",") if f.strip()
     ]
 
+    # Sentry's own plumbing. These share the sentry-capstone- prefix with the
+    # target app but are downstream of it, so a deploy here can never explain a
+    # target-app failure — it is the same feedback loop the log-group allow-list
+    # prevents, arriving through CloudTrail instead. Filtering them out also
+    # removes the deploy churn that a sweep generates about itself.
+    OWN_RESOURCES = [
+        r.strip() for r in os.environ.get(
+            "OWN_RESOURCES",
+            "sentry-capstone-agent-gulsher,"
+            "sentry-capstone-ingest-gulsher,"
+            "sentry-capstone-work-gulsher,"
+            "sentry-capstone-incidents-gulsher",
+        ).split(",") if r.strip()
+    ]
+
     # --- storage -------------------------------------------------------------
     INCIDENTS_TABLE = os.environ.get("INCIDENTS_TABLE", "")
     EVIDENCE_BUCKET = os.environ.get("EVIDENCE_BUCKET", "")

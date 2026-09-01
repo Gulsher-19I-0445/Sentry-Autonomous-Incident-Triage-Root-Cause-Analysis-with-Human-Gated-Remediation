@@ -91,20 +91,39 @@ TOOL_SPEC = {
 # CloudTrail
 # --------------------------------------------------------------------------- #
 
+def _is_own_infrastructure(name: str) -> bool:
+    """Sentry's own components, which are never evidence about the target app."""
+    return any(own in name for own in Config.OWN_RESOURCES)
+
+
 def _relevant(event: dict) -> bool:
-    """Keep only events touching this project's resources.
+    """Keep only events touching the target app's resources.
 
     CloudTrail is account-wide with no resource-level IAM, so filtering happens
     here. Without it the model would see other teams' deploys as evidence.
+
+    Sentry's own deploys are excluded as well: they carry the same name prefix,
+    they cannot cause a target-app failure, and during an evaluation sweep they
+    are the single largest source of irrelevant changes — the agent would spend
+    context reading about itself being redeployed.
     """
     resources = event.get("Resources") or []
     for r in resources:
         name = r.get("ResourceName") or ""
-        if "sentry-capstone" in name:
+        if "sentry-capstone" in name and not _is_own_infrastructure(name):
             return True
+
+    if resources:
+        # Named resources are authoritative; if every one of them was ours,
+        # do not fall through to the raw payload and re-admit the event.
+        if any("sentry-capstone" in (r.get("ResourceName") or "") for r in resources):
+            return False
+
     # Some events carry the target only inside the raw payload.
     raw = event.get("CloudTrailEvent") or ""
-    return "sentry-capstone" in raw
+    if "sentry-capstone" not in raw:
+        return False
+    return not _is_own_infrastructure(raw)
 
 
 def _extract_target(event: dict) -> str | None:
@@ -149,7 +168,8 @@ def _fetch_deployments(start: datetime, end: datetime) -> list[dict]:
             changes.append({
                 "kind": "deployment",
                 "event": event.get("EventName"),
-                "occurred_at": int(occurred.timestamp()) if occurred else None,
+                # ISO only. The epoch duplicate said the same thing again on
+                # every turn, and ISO is what lines up with log timestamps.
                 "occurred_at_iso": occurred.isoformat() if occurred else None,
                 "actor": event.get("Username"),
                 "target": _extract_target(event),

@@ -638,6 +638,55 @@ def test_relevant_rejects_a_raw_payload_for_another_workload():
     assert not changes._relevant(event)
 
 
+def test_relevant_rejects_sentrys_own_deploys():
+    """Sentry's components share the name prefix but are downstream of the
+    target app, so they cannot cause its failures. During a sweep they are also
+    the biggest source of change noise — the 2026-09-01 run surfaced 23 events,
+    mostly the pipeline redeploying itself."""
+    for own in ("sentry-capstone-agent-gulsher", "sentry-capstone-ingest-gulsher",
+                "sentry-capstone-work-gulsher", "sentry-capstone-incidents-gulsher"):
+        assert not changes._relevant(cloudtrail_event([own])), own
+
+
+def test_relevant_still_accepts_target_app_deploys():
+    for target in ("sentry-capstone-api-gulsher", "sentry-capstone-consumer-gulsher",
+                   "sentry-capstone-orders-gulsher"):
+        assert changes._relevant(cloudtrail_event([target])), target
+
+
+def test_relevant_rejects_own_infrastructure_named_only_in_the_payload():
+    event = cloudtrail_event(
+        [], raw={"requestParameters": {"functionName": "sentry-capstone-agent-gulsher"}}
+    )
+
+    assert not changes._relevant(event)
+
+
+def test_a_mixed_event_touching_the_target_app_is_kept():
+    """An event naming both is still relevant — the target app was touched."""
+    assert changes._relevant(
+        cloudtrail_event(["sentry-capstone-agent-gulsher",
+                          "sentry-capstone-api-gulsher"])
+    )
+
+
+def test_deployment_entries_carry_one_timestamp(incident, monkeypatch):
+    """Two renderings of the same instant is one of them resent every turn."""
+    occurred = datetime(2026, 9, 1, 7, 39, 20, tzinfo=timezone.utc)
+    monkeypatch.setattr(changes._ct, "lookup_events", lambda **kw: {
+        "Events": [{
+            "EventId": "e-1", "EventName": "UpdateFunctionCode20150331v2",
+            "EventTime": occurred, "Username": "gulsher",
+            "Resources": [{"ResourceName": "sentry-capstone-api-gulsher"}],
+        }]
+    })
+
+    entry = changes._fetch_deployments(occurred, occurred)[0]
+
+    assert entry["occurred_at_iso"].startswith("2026-09-01T07:39:20")
+    assert "occurred_at" not in entry
+
+
 def test_relevant_rejects_an_event_with_no_resources_at_all():
     assert not changes._relevant({"EventId": "e-1", "EventName": "PutRolePolicy"})
 
@@ -648,7 +697,7 @@ def test_relevant_handles_null_resources():
 
 def test_relevant_accepts_a_mixed_resource_list():
     assert changes._relevant(
-        cloudtrail_event(["unrelated-thing", "sentry-capstone-work-gulsher"])
+        cloudtrail_event(["unrelated-thing", "sentry-capstone-consumer-gulsher"])
     )
 
 
