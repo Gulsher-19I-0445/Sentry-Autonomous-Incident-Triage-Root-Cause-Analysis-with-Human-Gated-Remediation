@@ -1,0 +1,7 @@
+# Test-only dependencies.
+#
+# Nothing here ships to Lambda. The deployment bundles are stdlib + boto3, which
+# the Lambda runtime already provides — boto3 is listed only so the suite can
+# import the modules under test.
+pytest>=7.3
+boto3>=1.34

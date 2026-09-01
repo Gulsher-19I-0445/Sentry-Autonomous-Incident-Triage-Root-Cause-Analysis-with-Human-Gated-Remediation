@@ -1,0 +1,52 @@
+name: unit tests
+
+# Every bug this suite catches used to cost a deploy cycle plus a wait. Running
+# it on push is the point: the feedback has to arrive before the zip is built.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    # No credentials are configured for this job, deliberately. The suite must
+    # pass with none — anything that reaches AWS is a bug in the test, and the
+    # blank values below make that fail loudly rather than silently using a
+    # runner-level identity if one is ever added.
+    env:
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
+      AWS_DEFAULT_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"      # matches the Lambda runtime
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -v
+
+      - name: Check the Lambda bundles import cleanly on their own
+        # The zips are built with src/ as the root, so a module that only
+        # imports because the repo root is on sys.path would fail at cold start.
+        run: |
+          cd src
+          INCIDENTS_TABLE=ci WORK_QUEUE_URL=ci QUEUE_URL=ci TABLE_NAME=ci \
+          AWS_DEFAULT_REGION=us-east-1 \
+          python -c "
+          import importlib
+          for m in ('sentry.agent.handler', 'sentry.ingest.handler',
+                    'target_app.api.handler', 'target_app.consumer.handler'):
+              importlib.import_module(m)
+              print('ok', m)
+          "
