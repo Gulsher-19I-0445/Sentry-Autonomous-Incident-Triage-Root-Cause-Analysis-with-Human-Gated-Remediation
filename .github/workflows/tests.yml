@@ -27,6 +27,9 @@ jobs:
         with:
           python-version: "3.12"      # matches the Lambda runtime
           cache: pip
+          # setup-python globs for requirements.txt / pyproject.toml by default
+          # and fails the job outright when neither exists.
+          cache-dependency-path: requirements-dev.txt
 
       - name: Install test dependencies
         run: |
