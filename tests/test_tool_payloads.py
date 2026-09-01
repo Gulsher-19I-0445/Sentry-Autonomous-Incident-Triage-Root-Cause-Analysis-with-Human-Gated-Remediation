@@ -427,6 +427,43 @@ def test_correlate_detects_a_defect_even_while_traffic_rises():
     assert verdict["verdict"] == "errors_outpaced_load"
 
 
+def test_correlate_flags_a_saturated_error_rate_as_not_load():
+    """The 2026-09-01 e2e run: every request failed before and after a traffic
+    rise, so the rate never "rose" and the old comparison reported a dead
+    service as load-correlated. The model had to override the tool to get the
+    right answer."""
+    verdict = _correlate_for(
+        series((0, 4.0), (60, 4.0), (120, 10.0), (180, 10.0)),
+        series((0, 4.0), (60, 4.0), (120, 10.0), (180, 10.0)),
+    )
+
+    assert verdict["error_rate_first_half"] == 1.0
+    assert verdict["error_rate_second_half"] == 1.0
+    assert verdict["verdict"] == "errors_saturated"
+    assert "does not explain" in verdict["interpretation"]
+
+
+def test_saturated_verdict_does_not_shadow_a_genuine_rise():
+    """A rate that climbs into saturation is still better described as having
+    outpaced load — the rise is the more specific fact."""
+    verdict = _correlate_for(
+        series((0, 100.0), (60, 100.0), (120, 100.0), (180, 100.0)),
+        series((0, 1.0), (60, 1.0), (120, 90.0), (180, 95.0)),
+    )
+
+    assert verdict["verdict"] == "errors_outpaced_load"
+
+
+def test_a_low_but_flat_error_rate_is_still_load():
+    """The saturation floor must not swallow the load-spike decoy."""
+    verdict = _correlate_for(
+        series((0, 100.0), (60, 100.0), (120, 800.0), (180, 800.0)),
+        series((0, 2.0), (60, 2.0), (120, 16.0), (180, 16.0)),
+    )
+
+    assert verdict["verdict"] == "errors_tracked_load"
+
+
 def test_correlate_reports_no_errors_plainly():
     """A genuinely quiet resource: no errors and flat duration."""
     verdict = _correlate_for(
@@ -523,11 +560,23 @@ def test_correlate_survives_zero_traffic_in_the_first_half():
     """Percentage change is undefined, not zero — and must not raise."""
     verdict = _correlate_for(
         series((0, 0.0), (60, 0.0), (120, 100.0), (180, 100.0)),
-        series((0, 0.0), (60, 0.0), (120, 50.0), (180, 50.0)),
+        series((0, 0.0), (60, 0.0), (120, 1.0), (180, 1.0)),
     )
 
     assert verdict["invocations_change_pct"] is None
     assert "undefined" in verdict["interpretation"]
+
+
+def test_saturated_rate_with_undefined_traffic_change_does_not_raise():
+    """The saturated branch omits the traffic figure by design — traffic is what
+    it is asserting to be irrelevant — but it must still survive a None."""
+    verdict = _correlate_for(
+        series((0, 0.0), (60, 0.0), (120, 100.0), (180, 100.0)),
+        series((0, 0.0), (60, 0.0), (120, 90.0), (180, 90.0)),
+    )
+
+    assert verdict["verdict"] == "errors_saturated"
+    assert verdict["invocations_change_pct"] is None
 
 
 def test_correlate_states_evidence_without_naming_a_root_cause():
@@ -641,6 +690,28 @@ def test_deploy_events_cover_the_remediation_actions():
     assert "UpdateAlias20150331" in changes.DEPLOY_EVENTS
     assert "PublishVersion20150331" in changes.DEPLOY_EVENTS
     assert "UpdateFunctionCode20150331v2" in changes.DEPLOY_EVENTS
+
+
+def test_commit_query_dates_are_url_safe(monkeypatch):
+    """datetime.isoformat() renders UTC as '+00:00', and a bare '+' decodes to a
+    space in a query string — GitHub then matched nothing and the commits path
+    returned empty with no error, which is how it failed silently in production."""
+    captured = {}
+
+    monkeypatch.setenv("GITHUB_REPO", "owner/repo")
+    monkeypatch.setattr(changes, "_github_token", lambda: "tok")
+    monkeypatch.setattr(changes, "_github_get",
+                        lambda url, token: captured.setdefault("url", url) and None)
+
+    changes._fetch_commits(
+        datetime(2026, 8, 31, 7, 50, tzinfo=timezone.utc),
+        datetime(2026, 9, 1, 7, 50, tzinfo=timezone.utc),
+    )
+
+    url = captured["url"]
+    assert "+" not in url, f"unencoded '+' decodes to a space: {url}"
+    assert "since=2026-08-31T07%3A50%3A00Z" in url
+    assert "until=2026-09-01T07%3A50%3A00Z" in url
 
 
 def test_changes_returns_no_commits_when_github_is_unconfigured(incident, monkeypatch):

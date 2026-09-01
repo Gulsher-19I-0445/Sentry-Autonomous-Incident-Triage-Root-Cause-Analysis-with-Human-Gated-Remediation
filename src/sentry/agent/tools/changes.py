@@ -13,6 +13,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -207,10 +208,17 @@ def _fetch_commits(start: datetime, end: datetime) -> list[dict]:
         log_event(logger, "info", "github not configured, skipping commits")
         return []
 
+    # datetime.isoformat() renders UTC as "+00:00", and a bare '+' in a query
+    # string decodes to a space — GitHub then sees a malformed `since` and the
+    # window filter silently matches nothing. Encode the params, and use the
+    # Z-suffixed form so there is no '+' to encode in the first place.
+    params = urllib.parse.urlencode({
+        "since": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "until": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "per_page": MAX_COMMITS,
+    })
     listing = _github_get(
-        f"https://api.github.com/repos/{repo}/commits"
-        f"?since={start.isoformat()}&until={end.isoformat()}&per_page={MAX_COMMITS}",
-        token,
+        f"https://api.github.com/repos/{repo}/commits?{params}", token
     )
     if not isinstance(listing, list):
         return []

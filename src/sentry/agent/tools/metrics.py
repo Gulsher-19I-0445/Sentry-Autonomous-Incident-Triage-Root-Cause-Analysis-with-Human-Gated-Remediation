@@ -95,6 +95,10 @@ RAW_SERIES = {
     "ApproximateAgeOfOldestMessage",    # a queue backing up vs a spike
 }
 
+# Above this share of invocations failing, the error rate is a defect signal on
+# its own — no comparison against traffic can explain it away.
+SATURATED_ERROR_RATE = 0.5
+
 
 def _compact_series(points: list[dict], period: int) -> dict | None:
     """A dense encoding of an evenly spaced series.
@@ -288,9 +292,16 @@ def _correlate(series: dict[str, list[dict]], rate: list[dict]) -> dict:
     # rate that climbs regardless of traffic is the signature of a defect. The
     # absolute floor stops rounding noise at tiny error counts from reading as a
     # meaningful jump.
-    outpaced = rate_after > rate_before * 1.5 and (rate_after - rate_before) > 0.01
+    rose_disproportionately = (
+        rate_after > rate_before * 1.5 and (rate_after - rate_before) > 0.01
+    )
+    # Comparing only the *change* in rate misreads total failure as normality: a
+    # rate pinned near 1.0 across the whole window has not "risen", so it fell
+    # through to errors_tracked_load and reported a dead service as load. An
+    # absolute level has to be judged on its own terms.
+    saturated = rate_after >= SATURATED_ERROR_RATE
 
-    if outpaced:
+    if rose_disproportionately:
         verdict = "errors_outpaced_load"
         interpretation = (
             f"The error rate rose from {rate_before:.1%} to {rate_after:.1%} of "
@@ -298,6 +309,15 @@ def _correlate(series: dict[str, list[dict]], rate: list[dict]) -> dict:
             f"{'an undefined amount' if invocation_change is None else f'{invocation_change}%'}. "
             f"Errors grew faster than traffic, so the failure is not explained by "
             f"volume alone."
+        )
+    elif saturated:
+        verdict = "errors_saturated"
+        interpretation = (
+            f"{rate_before:.1%} of invocations failed in the first half of the "
+            f"window and {rate_after:.1%} in the second. The rate did not need to "
+            f"rise to be significant — at that level essentially every request "
+            f"fails regardless of how many arrive, so traffic volume does not "
+            f"explain it."
         )
     else:
         verdict = "errors_tracked_load"
