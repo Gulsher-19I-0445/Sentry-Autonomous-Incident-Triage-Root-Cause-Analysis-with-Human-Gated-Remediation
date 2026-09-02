@@ -55,14 +55,24 @@ class AgentRun:
     final_text: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     stop_reason: str = ""
     duration_ms: int = 0
     model_id: str = ""
- 
+
     @property
     def cost_usd(self) -> float:
         p = Config.price_for(self.model_id)
-        return (self.input_tokens / 1e6) * p["input"] + (self.output_tokens / 1e6) * p["output"]
+        # Bedrock reports cached tokens separately from input_tokens, so these
+        # three add rather than overlap. Pricing them all at the input rate
+        # would report a cached run as costing what an uncached one did.
+        return (
+            (self.input_tokens / 1e6) * p["input"]
+            + (self.output_tokens / 1e6) * p["output"]
+            + (self.cache_read_tokens / 1e6) * p["input"] * Config.CACHE_READ_MULTIPLIER
+            + (self.cache_write_tokens / 1e6) * p["input"] * Config.CACHE_WRITE_MULTIPLIER
+        )
  
     def to_dict(self) -> dict:
         return {
@@ -75,6 +85,8 @@ class AgentRun:
             "final_text": self.final_text,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
             "cost_usd": round(self.cost_usd, 6),
             "duration_ms": self.duration_ms,
             "stop_reason": self.stop_reason,
@@ -83,16 +95,45 @@ class AgentRun:
         }
 
 
+CACHE_POINT = {"cachePoint": {"type": "default"}}
+
+
+def _with_cache_points(messages: list[dict], system: list[dict]) -> None:
+    """Mark the reusable prefix so the next turn reads it instead of re-billing.
+
+    Two breakpoints, which is what a growing transcript needs:
+
+      * after the system prompt — stable for the whole investigation, and it
+        covers the tool definitions too, since Converse renders tools first
+      * on the last content block of the newest message — each turn reads the
+        breakpoint the previous turn wrote and writes a new one further along,
+        so cache hits accrue as the conversation grows
+
+    Mutates in place; both lists are rebuilt per call by run_agent.
+    """
+    system.append(CACHE_POINT)
+    if messages and isinstance(messages[-1].get("content"), list):
+        messages[-1]["content"] = [*messages[-1]["content"], CACHE_POINT]
+
+
 def _converse(model_id: str, messages: list[dict], system: str,
               tools: list[dict] | None, max_attempts: int = 5) -> dict:
     """One Converse call, with backoff on throttling."""
     inference_config: dict[str, Any] = {"maxTokens": Config.MAX_TOKENS}
     if Config.TEMPERATURE is not None and "sonnet-5" not in model_id:
         inference_config["temperature"] = Config.TEMPERATURE
+
+    system_blocks: list[dict] = [{"text": system}]
+    if Config.ENABLE_PROMPT_CACHE:
+        # Copy the messages one level down so the caller's transcript does not
+        # accumulate a cache point per turn.
+        messages = [dict(m) for m in messages]
+        _with_cache_points(messages, system_blocks)
+
     kwargs: dict[str, Any] = {
         "modelId": model_id,
         "messages": messages,
-        "system": [{"text": system}],
+        "system": system_blocks,
         "inferenceConfig": inference_config,
     }
     if tools:
@@ -156,6 +197,8 @@ def run_agent(
         usage = response.get("usage", {})
         run.input_tokens += usage.get("inputTokens", 0)
         run.output_tokens += usage.get("outputTokens", 0)
+        run.cache_read_tokens += usage.get("cacheReadInputTokens", 0) or 0
+        run.cache_write_tokens += usage.get("cacheWriteInputTokens", 0) or 0
         run.stop_reason = response.get("stopReason", "")
         content = response["output"]["message"]["content"]
         messages.append({"role": "assistant", "content": content})
@@ -168,6 +211,8 @@ def run_agent(
             log_event(logger, "info", "agent finished",
                       steps=len(run.steps), stop_reason=run.stop_reason,
                       input_tokens=run.input_tokens, output_tokens=run.output_tokens,
+                      cache_read_tokens=run.cache_read_tokens,
+                      cache_write_tokens=run.cache_write_tokens,
                       cost_usd=round(run.cost_usd, 6))
             if run.stop_reason == "max_tokens":
                       raise MaxStepsExceeded(

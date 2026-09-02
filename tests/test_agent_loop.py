@@ -166,6 +166,89 @@ def test_cost_reflects_accumulated_tokens(script):
     assert run.cost_usd == pytest.approx(18.0)
 
 
+# --------------------------------------------------------------------------- #
+# prompt caching
+# --------------------------------------------------------------------------- #
+
+def test_no_cache_points_when_disabled(script, monkeypatch):
+    """Off by default — the request shape is validated server-side, so a wrong
+    one fails the whole investigation rather than degrading."""
+    monkeypatch.setattr(bedrock.Config, "ENABLE_PROMPT_CACHE", False)
+    calls = script([text_response(FINAL_JSON)])
+
+    bedrock.run_agent("system", "user", tools=[], executor=lambda n, p: None)
+
+    assert json.dumps(calls[0]).count("cachePoint") == 0
+
+
+def test_cache_points_mark_system_and_the_newest_turn(monkeypatch):
+    """Two breakpoints: the system prompt (stable, and it covers tools since
+    Converse renders those first) and the end of the latest message, so each
+    turn reads what the previous one wrote."""
+    monkeypatch.setattr(bedrock.Config, "ENABLE_PROMPT_CACHE", True)
+    captured = {}
+
+    def fake_client_converse(**kwargs):
+        captured.update(kwargs)
+        return text_response(FINAL_JSON)
+
+    monkeypatch.setattr(bedrock._client, "converse", fake_client_converse)
+
+    bedrock._converse("m", [{"role": "user", "content": [{"text": "hi"}]}], "sys", None)
+
+    assert captured["system"][-1] == bedrock.CACHE_POINT
+    assert captured["messages"][-1]["content"][-1] == bedrock.CACHE_POINT
+
+
+def test_cache_points_do_not_accumulate_in_the_transcript(script, monkeypatch):
+    """The caller's message list is reused across turns. Appending a cache point
+    to it in place would add one per turn and blow the 4-breakpoint limit."""
+    monkeypatch.setattr(bedrock.Config, "ENABLE_PROMPT_CACHE", True)
+    calls = script([
+        tool_use_response("search_logs", {"log_group": "api"}),
+        tool_use_response("get_metrics", {"target": "api"}),
+        text_response(FINAL_JSON),
+    ])
+
+    bedrock.run_agent("system", "user", tools=[], executor=lambda n, p: {"ok": True})
+
+    for call in calls:
+        for message in call["messages"]:
+            content = message.get("content", [])
+            points = [b for b in content if b == bedrock.CACHE_POINT]
+            assert len(points) <= 1, "a turn accumulated more than one cache point"
+
+
+def test_cached_tokens_accumulate_and_are_priced_separately(script):
+    """Bedrock reports cached tokens outside inputTokens. Pricing them at the
+    full input rate would report a cached run as costing an uncached one."""
+    script([{
+        "output": {"message": {"content": [{"text": FINAL_JSON}]}},
+        "stopReason": "end_turn",
+        "usage": {"inputTokens": 1_000_000, "outputTokens": 0,
+                  "cacheReadInputTokens": 1_000_000,
+                  "cacheWriteInputTokens": 1_000_000},
+    }])
+
+    run = run_agent("system", "user", tools=[], executor=lambda n, p: None,
+                    model_id="us.anthropic.claude-sonnet-5")
+
+    assert run.cache_read_tokens == 1_000_000
+    assert run.cache_write_tokens == 1_000_000
+    # 1M input at $3 + 1M read at 0.1x + 1M write at 1.25x
+    assert run.cost_usd == pytest.approx(3.0 + 0.3 + 3.75)
+
+
+def test_absent_cache_usage_is_treated_as_zero(script):
+    """An uncached response omits the fields entirely."""
+    script([text_response(FINAL_JSON, tokens=(1000, 100))])
+
+    run = run_agent("system", "user", tools=[], executor=lambda n, p: None)
+
+    assert run.cache_read_tokens == 0
+    assert run.to_dict()["cache_write_tokens"] == 0
+
+
 def test_missing_usage_block_does_not_crash_the_run(script):
     """Not every Converse response carries usage; a KeyError here would lose a
     completed investigation over an accounting detail."""

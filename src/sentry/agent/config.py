@@ -14,10 +14,22 @@ class Config:
     TEMPERATURE = float(os.environ.get("TEMPERATURE", "0"))
 
     # $ per 1M tokens, for the cost-per-incident metric. Update if rates change.
+    # Cache reads bill at ~0.1x input and writes at ~1.25x (5-minute TTL), so a
+    # run that caches has to price the three separately or cost_usd overstates
+    # by several times.
     PRICING = {
         "sonnet": {"input": 3.00, "output": 15.00},
         "haiku": {"input": 1.00, "output": 5.00},
     }
+    CACHE_READ_MULTIPLIER = 0.1
+    CACHE_WRITE_MULTIPLIER = 1.25
+
+    # Every turn resends the whole transcript, so the prefix is re-billed on each
+    # one. Cache points make that a read instead. Off by default: the request
+    # shape is validated server-side, so a bad one fails the whole investigation
+    # rather than degrading — turn it on deliberately and check
+    # cache_read_tokens on the first run.
+    ENABLE_PROMPT_CACHE = os.environ.get("ENABLE_PROMPT_CACHE", "false").lower() == "true"
 
     # --- agent behaviour -----------------------------------------------------
     MAX_AGENT_STEPS = int(os.environ.get("MAX_AGENT_STEPS", "8"))

@@ -143,6 +143,8 @@ def _run_investigation(incident: dict) -> tuple[RCA, AgentRun]:
         # Fold the repair's cost into the run so the metric stays honest.
         run.input_tokens += repair.input_tokens
         run.output_tokens += repair.output_tokens
+        run.cache_read_tokens += repair.cache_read_tokens
+        run.cache_write_tokens += repair.cache_write_tokens
         run.final_text = repair.final_text
         run.steps.extend(repair.steps)
 
