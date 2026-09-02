@@ -30,8 +30,14 @@ _secrets = boto3.client("secretsmanager", region_name=Config.REGION)
 
 MAX_LOOKBACK_HOURS = 24
 DEFAULT_LOOKBACK_HOURS = 24
-MAX_COMMITS = 10
-GITHUB_TIMEOUT_S = 8
+MAX_COMMITS = 5
+GITHUB_TIMEOUT_S = 4
+# Fetching changed files costs one request per commit, so the worst case scales
+# with repo activity: at 10 commits and an 8s timeout it was ~88s inside a
+# single tool call, against a 120s Lambda limit — which is how a busy day in the
+# repo turned into Sandbox.Timedout. Cap the total instead of trusting the
+# per-request timeout to bound it.
+COMMIT_DETAIL_BUDGET_S = 20
 
 # CloudTrail event names that represent a deploy or config change to this app.
 # lookup_events allows ONE attribute filter per call, so we loop.
@@ -244,12 +250,14 @@ def _fetch_commits(start: datetime, end: datetime) -> list[dict]:
         return []
 
     commits: list[dict] = []
+    deadline = time.time() + COMMIT_DETAIL_BUDGET_S
+
     for item in listing[:MAX_COMMITS]:
         sha = item.get("sha", "")
         commit = item.get("commit") or {}
         author = commit.get("author") or {}
 
-        entry = {
+        entry: dict = {
             "kind": "commit",
             "sha": sha[:8],
             "message": (commit.get("message") or "").split("\n")[0][:200],
@@ -258,13 +266,23 @@ def _fetch_commits(start: datetime, end: datetime) -> list[dict]:
             "changed_files": [],
         }
 
-        # File PATHS only — full patches are expensive and paths are what let
-        # the model connect a change to a stack trace.
-        detail = _github_get(f"https://api.github.com/repos/{repo}/commits/{sha}", token)
-        if isinstance(detail, dict):
-            entry["changed_files"] = [
-                f.get("filename") for f in (detail.get("files") or [])[:20]
-            ]
+        if time.time() >= deadline:
+            # Say so rather than leaving changed_files empty: an empty list
+            # reads as "this commit touched nothing", which is evidence, and
+            # wrong evidence at that.
+            entry["changed_files_unavailable"] = "lookup budget exhausted"
+            log_event(logger, "warning", "commit detail budget exhausted",
+                      fetched=len(commits), total=len(listing))
+        else:
+            # File PATHS only — full patches are expensive and paths are what
+            # let the model connect a change to a stack trace.
+            detail = _github_get(
+                f"https://api.github.com/repos/{repo}/commits/{sha}", token
+            )
+            if isinstance(detail, dict):
+                entry["changed_files"] = [
+                    f.get("filename") for f in (detail.get("files") or [])[:20]
+                ]
 
         commits.append(entry)
 

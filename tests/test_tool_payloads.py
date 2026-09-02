@@ -763,6 +763,58 @@ def test_commit_query_dates_are_url_safe(monkeypatch):
     assert "until=2026-09-01T07%3A50%3A00Z" in url
 
 
+def test_commit_detail_budget_stops_before_the_lambda_timeout(monkeypatch):
+    """One request per commit meant the worst case scaled with repo activity —
+    at 10 commits it exceeded the 120s Lambda limit and killed S06 outright.
+    The budget must bound it regardless of how many commits come back."""
+    monkeypatch.setenv("GITHUB_REPO", "owner/repo")
+    monkeypatch.setattr(changes, "_github_token", lambda: "tok")
+    monkeypatch.setattr(changes, "COMMIT_DETAIL_BUDGET_S", 0)
+
+    listing = [{"sha": f"{i:040x}", "commit": {"message": f"c{i}", "author": {}}}
+               for i in range(5)]
+    detail_calls = []
+
+    def fake_get(url, token):
+        if "/commits/" in url:
+            detail_calls.append(url)
+            return {"files": [{"filename": "a.py"}]}
+        return listing
+
+    monkeypatch.setattr(changes, "_github_get", fake_get)
+
+    commits = changes._fetch_commits(
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )
+
+    assert len(commits) == 5, "commits themselves are still returned"
+    assert detail_calls == [], "no detail request should run once the budget is gone"
+    # An empty changed_files would read as "this commit touched nothing".
+    assert all(c["changed_files_unavailable"] for c in commits)
+
+
+def test_commit_details_are_fetched_when_the_budget_allows(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPO", "owner/repo")
+    monkeypatch.setattr(changes, "_github_token", lambda: "tok")
+
+    listing = [{"sha": "a" * 40, "commit": {"message": "c", "author": {}}}]
+
+    def fake_get(url, token):
+        return {"files": [{"filename": "src/target_app/api/handler.py"}]} \
+            if "/commits/" in url else listing
+
+    monkeypatch.setattr(changes, "_github_get", fake_get)
+
+    commit = changes._fetch_commits(
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )[0]
+
+    assert commit["changed_files"] == ["src/target_app/api/handler.py"]
+    assert "changed_files_unavailable" not in commit
+
+
 def test_changes_returns_no_commits_when_github_is_unconfigured(incident, monkeypatch):
     """GITHUB_REPO is unset today; the tool must degrade rather than fail."""
     monkeypatch.setattr(changes, "_fetch_deployments", lambda start, end: [])

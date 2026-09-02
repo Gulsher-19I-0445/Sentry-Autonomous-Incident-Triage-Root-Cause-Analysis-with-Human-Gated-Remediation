@@ -51,10 +51,23 @@ _ddb = boto3.resource("dynamodb", region_name=REGION).Table(TABLE)
 # --------------------------------------------------------------------------- #
 
 def _consumer_errors_since(start: int) -> int:
+    """Did the consumer fail since `start`?
+
+    Deliberately broader than `level = 'ERROR'`. A memory kill produces no
+    application log line at all — the runtime is killed before the handler can
+    log anything — so a JSON-level filter reports S07 as "did not reproduce"
+    every single time, no matter how thoroughly it reproduced. Lambda still
+    writes its own platform lines for kills and timeouts, so match those too.
+    """
     q = _logs.start_query(
         logGroupNames=["/aws/lambda/sentry-capstone-consumer-gulsher"],
         startTime=start, endTime=int(time.time()),
-        queryString="fields @timestamp | filter level = 'ERROR' | limit 20",
+        queryString=(
+            "fields @timestamp, @message "
+            "| filter @message like /ERROR|Task timed out|Runtime exited|"
+            "errorMessage|Process exited/ "
+            "| limit 20"
+        ),
     )["queryId"]
     for _ in range(15):
         time.sleep(1)
@@ -193,8 +206,11 @@ def run_scenario(scenario: sc.Scenario, run_index: int, verbose: bool = True) ->
         if scenario.chaos_mode:
             arm(scenario.chaos_mode, remaining=scenario.traffic_count + 2)
 
-        failures = drive_traffic(scenario.traffic_count) if scenario.traffic_count else 0
-
+        # Drive traffic ONCE. There used to be a second, earlier call whose
+        # result was immediately overwritten; it burned most of the armed budget
+        # (arm() allows traffic_count + 2 fires) so only a couple of requests in
+        # the measured batch actually tripped the fault, and any consumer errors
+        # it caused happened before `started_at` and so were never counted.
         started_at = int(time.time())
         elapsed: list[float] = []
         failures = drive_traffic(scenario.traffic_count, elapsed) if scenario.traffic_count else 0
@@ -211,15 +227,24 @@ def run_scenario(scenario: sc.Scenario, run_index: int, verbose: bool = True) ->
         # consumer breaks.
         if scenario.chaos_mode:
             if scenario.fails_in == "api":
+                observed = f"{failures} of {scenario.traffic_count} API calls failed"
                 reproduced = failures > 0
             elif scenario.fails_in == "consumer":
-                reproduced = _consumer_errors_since(started_at) > 0
+                consumer_errors = _consumer_errors_since(started_at)
+                observed = f"{consumer_errors} consumer error lines"
+                reproduced = consumer_errors > 0
             else:  # latency
-                reproduced = max(elapsed, default=0) > 3.0
+                slowest = max(elapsed, default=0)
+                observed = f"slowest request {slowest:.1f}s, threshold 3.0s"
+                reproduced = slowest > 3.0
 
             if not reproduced:
+                # Report what was actually observed. "did not reproduce" alone
+                # costs a whole sweep to work out whether the fault never fired,
+                # fired somewhere else, or fired and went undetected.
                 return failed(scenario, run_index,
-                              f"did not reproduce in {scenario.fails_in}")
+                              f"did not reproduce in {scenario.fails_in} "
+                              f"({observed}; mode={scenario.chaos_mode})")
 
         # if scenario.chaos_mode and failures == 0:
         #     return failed(scenario, run_index,
