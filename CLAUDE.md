@@ -31,7 +31,9 @@ src/
     │   ├── prompt.py        system prompt + user prompt builder
     │   ├── schema.py        RCA contract + validation
     │   └── tools/
-    │       ├── __init__.py  registry: specs() and dispatch()
+    │       ├── init.py      registry: specs() and dispatch()
+    │       │                (NOT __init__.py, which is empty — the handler
+    │       │                 imports `from .tools.init import ...`)
     │       ├── base.py      window/resource guards shared by all tools
     │       ├── logs.py      CloudWatch Logs Insights
     │       ├── metrics.py   CloudWatch metrics
@@ -133,65 +135,105 @@ someone hitting a `/break` endpoint.
 ## Where it stands
 
 Done: Epics 0–3 (environment, target app, chaos injection, alarm pipeline,
-ingest with dedup, agent core with four tools). SEN-21 harness written.
+ingest with dedup, agent core with four tools). SEN-21 harness written. Unit
+test suite + CI. GitHub wired into `get_recent_changes`.
 
 In progress: SEN-22/23 — getting a clean baseline across the genuine scenarios.
+A full end-to-end run on 2026-09-02 diagnosed a real code-caused failure
+correctly (4 tool calls, $0.0599, confidence 0.92, commit-level attribution,
+first `PENDING_APPROVAL`). That is one run on one scenario — the sweep has not
+been done.
 
 Not started: Epic 5 (approval gate + executor), Epic 6 (dashboard),
 Epic 7 (adversarial scenarios, calibration, write-up). Terraform translation —
 everything is currently console-built, and this must not slip to the final week.
 
+**Blocking the sweep:** `app.zip` currently carries a deliberate defect
+(`body["customer_tier"]` in `_create_order`, commit `ac5dec34`) so that a
+code-caused failure could be tested end to end. Every order request 500s
+regardless of chaos mode, so no genuine scenario can run until it is reverted
+and redeployed.
+
 ---
 
 ## Open problems
 
-**Cost per investigation is too high.** ~$0.13–0.22 on Sonnet. Input tokens
-dominate (~90%) because every turn resends all prior tool results. Naive
-implementation was $0.24; payload trimming has helped but not enough. Target is
-$0.03–0.05.
+**Cost per investigation.** Was ~$0.13–0.22; now **$0.0599** (4 tool calls,
+14,055 input / 1,181 output) against a $0.03–0.05 target. What actually moved it:
 
-A first attempt at replacing raw metric series with summary statistics made
-things *worse* — the agent compensated by making more tool calls (6 -> 11,
-$0.13 -> $0.22). Lesson: over-aggressive summarisation costs more than it saves.
-Current thinking is to keep summaries for count metrics but preserve the raw
-series for `Duration` and `ErrorRate`, which are the two the model actually
-reasons over.
+- log entries deduplicated before returning (identical stack traces were resent
+  in full on every turn)
+- metric series in a dense `{start, period, values[]}` encoding instead of a
+  list of `{timestamp, value}` objects
+- the traffic comparison computed in code (`load_vs_defect`) so the model does
+  not spend a turn deriving it
+- CloudTrail filtered to target-app resources only — the pipeline's own deploys
+  were 74% of the change payload during a sweep
 
-**The agent systematically over-escalates.** It sets
-`needs_human_investigation` on cases with clear evidence, so the abstention axis
-scores near zero. Partly a scenario problem: the chaos flag lives in DynamoDB,
-invisible to CloudTrail and to any diff, so genuinely no discoverable change
-explains the failure and escalating is defensible. S01 now publishes a real
-Lambda version before arming to give the agent a legitimate rollback target.
-Note this is a *safe* failure mode — an over-cautious agent is far better than
-one that confidently blames the wrong commit.
+The earlier failed experiment is still worth remembering: replacing raw metric
+series with summary statistics alone made things *worse* (6 -> 11 calls,
+$0.13 -> $0.22), because the model compensated with more tool calls.
+Under-informing costs more than over-informing.
+
+**The remaining lever is prompt caching**, not payload shaping. Four tool calls
+with one payload each is near the floor. Input is 70% of cost and most of it is
+the prefix being resent each turn; Bedrock Converse `cachePoint` blocks price
+that at ~0.1x. Estimated landing point ~$0.035.
+
+**Over-escalation — largely resolved, and the cause was not the model.**
+`validate()` rejected an RCA that both escalates and proposes a remediation, but
+`SCHEMA_DESCRIPTION` never stated that rule, so the model could only discover it
+by failing validation and paying a repair round trip. The field name compounded
+it: `needs_human_investigation` reads as "should a human review this", which in
+a human-gated system is always true. Both are now stated explicitly in the
+prompt. Confidence went 0.4 -> 0.82 -> 0.92 across successive runs.
+
+**Rule of thumb this produced:** every rule `validate()` enforces must appear in
+`SCHEMA_DESCRIPTION`. A validator that knows something the prompt does not is a
+repair round trip you are paying for on every run.
 
 **Test-run contamination.** The incident window catches debris from previous
 test runs, so the agent finds unrelated failures from other scenarios. Window
 narrowed to ±5 minutes; consider deleting the target app log groups between
 sweeps.
 
-**GitHub is not configured.** `GITHUB_REPO` and `GITHUB_TOKEN_SECRET` are unset,
-so `get_recent_changes` returns CloudTrail deployments without the file paths
-that would let the agent connect a change to a stack trace. The agent has twice
-named this as the gap preventing a confident conclusion.
+**Abstention is now untested under the new conditions.** With GitHub live, every
+genuine scenario becomes a false-attribution test: the agent sees recent commits
+touching the failing file while a DynamoDB flag is the real cause. Correctly
+answering "no change is implicated" there is the harder half of the thesis and
+has never been run with commits visible.
+
+**Results are not reproducible run to run.** Sonnet 5 rejects `temperature`, so
+every number above is n=1. Run three times before quoting anything.
 
 ---
 
 ## Testing
 
-**Unit tests do not exist yet and should.** Every bug so far was catchable
-offline: a missing `@dataclass`, a trailing comma making a client a tuple, an
-exception class not inheriting from `Exception`, wrong relative import depth, a
-`TOOL_SPEC` that did not exist, code changed in one place but not the other.
-Each cost a deploy cycle. Highest-value additions:
+**321 unit tests in `tests/`, run with `python -m pytest`.** No AWS credentials,
+no network — `conftest.py` overrides credentials with fakes and blocks
+`socket.connect`, so a test that escapes stubbing fails loudly instead of
+quietly calling AWS. CI runs them on push (`.github/workflows/tests.yml`).
 
-- import every module; assert `bedrock._client` is a client not a tuple
-- assert every registered tool has a matching spec with the right name
-- assert every custom exception subclasses `Exception`
-- schema validation: valid passes, each semantic rule rejects
-- agent loop against a stubbed `_converse` — scripted tool sequences,
-  `max_tokens` truncation, invalid-JSON-then-repair
+They are discovery-based rather than hardcoded: modules are enumerated with
+`pkgutil`, exception classes are found by AST-scanning every `raise`, so new
+code is covered without anyone remembering to update the suite. Coverage:
+
+- import every module; assert no boto3 client is a tuple (the trailing-comma bug)
+- every registered tool has a spec whose name matches its registry key, and a
+  callable whose signature accepts every advertised parameter
+- every class that gets raised actually subclasses `Exception`
+- schema validation: valid passes, each semantic rule rejects with a message
+  specific enough for the model to repair itself
+- the Converse loop against a stubbed `_converse` — scripted tool sequences,
+  token accumulation, `max_tokens` truncation, exactly-one-repair
+- tool payload shaping: dedup, dense series encoding, the load-vs-defect
+  verdict, CloudTrail relevance filtering
+- the target app never reveals fault injection in a log message or symbol name
+
+Two bugs were found by writing them: `IllegalTransition` did not subclass
+`Exception`, and `logs.run` computed a deduplication then returned the raw rows
+anyway.
 
 **The integration harness is not a unit test.** It drives the real deployed
 stack with real failures and costs real money (~$0.15/scenario). Use it to
@@ -227,6 +269,12 @@ the real pipeline reacting to the same errors.
 | incident stuck in `INVESTIGATING` | crashed mid-run; the status guard means it is never retried |
 | alarm will not fire | it only publishes on a state *transition* — force OK then ALARM |
 | JSON args rejected by the CLI | PowerShell passes backslashes literally — use a here-string or `ConvertTo-Json` |
+| GitHub commit window silently matches nothing | `datetime.isoformat()` renders UTC as `+00:00`, and a bare `+` decodes to a space in a query string — encode the params, or use the `Z` form |
+| agent learns the failures are injected | anything that reaches its evidence: a log message, **a commit subject line**, or repo file *contents* if it ever gets read access. Paths and file bodies are not fetched today; messages are |
+| Lambda loses `INCIDENTS_TABLE` after a config change | `update-function-configuration --environment` **replaces** the whole variable map — read, merge, write, or use the console |
+| CI fails before running any test | `actions/setup-python` with `cache: pip` globs for `requirements.txt`/`pyproject.toml` and errors when neither exists — set `cache-dependency-path` |
+| two unrelated edits land in one commit | `git add <file>` stages the whole file; splitting them afterwards needs `reset --soft` and a temporary revert |
+| e2e run produces no investigation | the sweep pre-flight *disables* alarm actions — an end-to-end test needs them **enabled**, and the alarm still only fires on a transition |
 
 ---
 
