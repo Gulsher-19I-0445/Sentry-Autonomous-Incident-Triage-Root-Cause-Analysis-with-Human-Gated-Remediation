@@ -88,7 +88,6 @@ def _create_order(event: dict) -> dict:
     put_order(order_id, {
         "item": body.get("item", "widget"),
         "quantity": int(body.get("quantity", 1)),
-        "customer_tier": body["customer_tier"],
     })
 
     message = {"order_id": order_id, "correlation_id": get_correlation_id()}
