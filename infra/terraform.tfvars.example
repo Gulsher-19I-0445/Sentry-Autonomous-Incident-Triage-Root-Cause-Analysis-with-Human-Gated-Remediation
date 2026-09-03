@@ -1,0 +1,65 @@
+# Copy to terraform.tfvars and edit. That file is gitignored — keep it that way.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+# Required. Last segment of every resource name, so several people can deploy
+# into one shared account without colliding. Use something recognisably yours.
+owner = "yourname"
+
+# Optional overrides ---------------------------------------------------------
+
+# aws_region   = "us-east-1"
+# project_name = "sentry"
+
+# Deploy the bundled application that fails on purpose. Leave true for a
+# working system from a single apply; without it the pipeline has nothing to
+# investigate.
+# create_target_app = true
+
+# Point Sentry at applications you already run. Only used when
+# create_target_app = false. Anything writing to CloudWatch Logs works —
+# Lambda, ECS, EKS via Container Insights.
+#
+# lambda_function_name is optional and only meaningful for Lambda: it is what
+# makes automated rollback possible. Targets without it are still investigated,
+# but remediation is escalated to a human rather than applied.
+#
+# investigation_targets = [
+#   {
+#     name                 = "checkout"
+#     log_group            = "/aws/lambda/checkout-prod"
+#     lambda_function_name = "checkout-prod"
+#   },
+#   {
+#     name      = "orders-api"
+#     log_group = "/ecs/orders-api"
+#   },
+# ]
+
+# Let the agent read commits as evidence. The TOKEN IS NOT SET HERE — Terraform
+# creates an empty secret and you populate it out of band, so the value never
+# enters a plan, a state file, or a CI log. See README.
+# github_repo = "owner/repo"
+
+# Notified when an incident needs a decision. Requires confirming an email.
+# alarm_email = "you@example.com"
+
+# Model and cost -------------------------------------------------------------
+
+# The "us." inference-profile prefix is required; bare model ids are rejected.
+# agent_model_id = "us.anthropic.claude-sonnet-5"
+
+# Hard ceiling on tool-use turns per investigation. Bounds worst-case cost.
+# max_agent_steps = 8
+
+# How far either side of the incident the agent may look. Narrow reduces
+# cross-incident contamination; wide risks unrelated failures as evidence.
+# log_window_minutes = 5
+
+# Bill the resent transcript prefix at cache-read rates. Off by default: the
+# request shape is validated server-side, so a rejected one fails the whole
+# investigation rather than degrading. Turn on deliberately and check
+# cache_read_tokens on the first run.
+# enable_prompt_cache = false
+
+# tags = { CostCentre = "learning" }
