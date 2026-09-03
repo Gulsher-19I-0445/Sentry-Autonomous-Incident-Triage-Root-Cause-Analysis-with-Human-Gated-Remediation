@@ -76,6 +76,14 @@
   .empty, .error { color: var(--muted); padding: 30px 0; text-align: center; }
   .error { color: var(--bad); }
   code { font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .live { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .working { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+             background: var(--warn); margin-right: 6px;
+             animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .working { animation: none; opacity: .8 } }
+  .stuck { border-color: var(--bad); }
+  .stuck-note { color: var(--bad); font-size: 13px; margin-top: 8px; }
 </style>
 
 <header>
@@ -84,12 +92,14 @@
   <input id="token" placeholder="approval token" type="password" size="18">
   <select id="filter">
     <option value="PENDING_APPROVAL">Awaiting approval</option>
+    <option value="NEW,INVESTIGATING">In progress</option>
     <option value="all">All incidents</option>
     <option value="ESCALATED">Escalated</option>
     <option value="INFORMATIONAL">Informational</option>
     <option value="EXECUTED,APPROVED,CLOSED">Actioned</option>
     <option value="FAILED,REJECTED">Failed / rejected</option>
   </select>
+  <label class="live"><input type="checkbox" id="auto"> auto</label>
   <button id="refresh">Refresh</button>
 </header>
 
@@ -140,7 +150,49 @@ function confidenceNote(c) {
   return "";
 }
 
+const IN_PROGRESS = new Set(["NEW", "INVESTIGATING"]);
+// A crashed investigation leaves the incident in INVESTIGATING forever: the
+// status guard means it is never retried, so nothing ever moves it. Past this
+// many seconds it is almost certainly dead rather than slow — the observed mean
+// is ~75s and the agent's own timeout is 300s.
+const STUCK_AFTER_S = 360;
+
+const ago = (ts) => {
+  if (!ts) return null;
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - Number(ts)));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+};
+
+function progressCard(i) {
+  const elapsed = Math.floor(Date.now() / 1000 - Number(i.updated_at || i.triggered_at || 0));
+  const stuck = i.status === "INVESTIGATING" && elapsed > STUCK_AFTER_S;
+
+  return `<article class="card${stuck ? " stuck" : ""}">
+    <div class="row">
+      <span class="status s-${esc(i.status)}">
+        ${stuck ? "" : '<span class="working"></span>'}${esc(i.status)}
+      </span>
+      <span class="id">${esc(i.incident_id)}</span>
+      <span class="id">${esc(i.alarm_name || "")}</span>
+    </div>
+    <p class="summary">${esc(i.state_reason || "Alarm fired; no analysis yet.")}</p>
+    <div class="meta">
+      <span>${i.status === "NEW" ? "queued" : "running"} for <b>${esc(ago(i.updated_at))}</b></span>
+      ${i.suppressed_count ? `<span><b>${esc(i.suppressed_count)}</b> duplicate alarms absorbed</span>` : ""}
+    </div>
+    ${stuck ? `<div class="stuck-note">
+      Stuck — an investigation that crashed mid-run stays in INVESTIGATING and is
+      never retried, because the status guard treats it as already in progress.
+      Check the agent log for this incident id.
+    </div>` : ""}
+  </article>`;
+}
+
 function card(i) {
+  if (IN_PROGRESS.has(i.status)) return progressCard(i);
+
   const pending = i.status === "PENDING_APPROVAL";
   const conf = i.confidence == null ? "—" : Number(i.confidence).toFixed(2);
 
@@ -191,10 +243,14 @@ function card(i) {
   </article>`;
 }
 
-async function load() {
+let timer = null;
+
+async function load(quiet = false) {
   const list = $("list");
-  list.innerHTML = `<p class="empty">Loading…</p>`;
-  $("counts").innerHTML = "";
+  if (!quiet) {
+    list.innerHTML = `<p class="empty">Loading…</p>`;
+    $("counts").innerHTML = "";
+  }
   try {
     const data = await call(`/incidents?status=${encodeURIComponent($("filter").value)}`);
     $("counts").innerHTML = Object.entries(data.counts_by_status || {})
@@ -202,9 +258,21 @@ async function load() {
     list.innerHTML = data.incidents.length
       ? data.incidents.map(card).join("")
       : `<p class="empty">Nothing here.</p>`;
+    schedule(data.incidents.some((i) => IN_PROGRESS.has(i.status)));
   } catch (err) {
+    // Show the error but do not keep polling into it — a wrong token would
+    // otherwise retry forever.
     list.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+    schedule(false);
   }
+}
+
+function schedule(anythingRunning) {
+  clearTimeout(timer);
+  if (!$("auto").checked) return;
+  // Poll quickly while work is actually moving, slowly otherwise. An
+  // investigation takes ~75s, so 5s is responsive without being wasteful.
+  timer = setTimeout(() => load(true), anythingRunning ? 5000 : 20000);
 }
 
 async function act(box, verb) {
@@ -238,7 +306,13 @@ $("list").addEventListener("click", (e) => {
   if (e.target.classList.contains("reject")) act(box, "reject");
 });
 
-$("refresh").addEventListener("click", load);
-$("filter").addEventListener("change", load);
+$("refresh").addEventListener("click", () => load());
+$("filter").addEventListener("change", () => load());
+$("auto").addEventListener("change", () => {
+  store.setItem("gate_auto", $("auto").checked ? "1" : "");
+  $("auto").checked ? load(true) : clearTimeout(timer);
+});
+
+$("auto").checked = store.getItem("gate_auto") === "1";
 if ($("url").value && $("token").value) load();
 </script>

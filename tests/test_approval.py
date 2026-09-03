@@ -207,6 +207,45 @@ def test_the_summary_carries_the_outcome_of_a_finished_incident(monkeypatch, pen
     assert entry["execution_result"]["to_version"] == "2"
 
 
+def test_an_in_progress_incident_carries_what_the_dashboard_needs(monkeypatch):
+    """NEW and INVESTIGATING have no RCA yet, so the summary must fall back to
+    the alarm's own reason and the timestamps — otherwise the card renders as a
+    row of dashes."""
+    running = {
+        "incident_id": "api-errors-1788400000",
+        "status": "INVESTIGATING",
+        "alarm_name": "sentry-capstone-api-errors-gulsher",
+        "state_reason": "Threshold Crossed: 3 datapoints greater than 1.0",
+        "triggered_at": 1788400000,
+        "updated_at": 1788400042,
+        "suppressed_count": 2,
+    }
+    monkeypatch.setattr(gate, "list_by_status", lambda s, **k: [running])
+
+    entry = body_of(gate.handler(request(), None))["incidents"][0]
+
+    assert entry["state_reason"].startswith("Threshold Crossed")
+    assert entry["updated_at"] == 1788400042
+    assert entry["suppressed_count"] == 2
+    # An incident with no RCA must not blow up the summariser.
+    assert entry["summary"] is None
+    assert entry["evidence"] == []
+
+
+def test_in_progress_statuses_are_listable(monkeypatch):
+    """The dashboard's "In progress" filter asks for these two by name."""
+    asked = []
+    monkeypatch.setattr(gate, "list_by_status",
+                        lambda s, **k: asked.append(s.value) or [])
+
+    event = request(path="/incidents")
+    event["queryStringParameters"] = {"status": "NEW,INVESTIGATING"}
+    response = gate.handler(event, None)
+
+    assert response["statusCode"] == 200
+    assert sorted(asked) == ["INVESTIGATING", "NEW"]
+
+
 def test_the_summary_carries_evidence_and_tool_count(monkeypatch, pending):
     pending["rca"]["evidence"] = ["14 KeyErrors", "invocations flat"]
     pending["trace"]["steps"] = [{"tool": "search_logs"}, {"tool": "get_metrics"}]

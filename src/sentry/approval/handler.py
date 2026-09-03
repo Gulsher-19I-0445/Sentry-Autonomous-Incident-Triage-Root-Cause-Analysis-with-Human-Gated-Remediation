@@ -83,6 +83,12 @@ def _summarise(incident: dict) -> dict:
         "status": incident.get("status"),
         "alarm_name": incident.get("alarm_name"),
         "triggered_at": incident.get("triggered_at"),
+        # For an incident still being worked, these are all the dashboard has —
+        # there is no RCA yet. updated_at is what makes a stuck INVESTIGATING
+        # distinguishable from one that is simply still running.
+        "updated_at": incident.get("updated_at"),
+        "state_reason": incident.get("state_reason"),
+        "suppressed_count": incident.get("suppressed_count"),
         "root_cause": rca.get("root_cause_category"),
         "summary": rca.get("summary"),
         "confidence": rca.get("confidence"),
