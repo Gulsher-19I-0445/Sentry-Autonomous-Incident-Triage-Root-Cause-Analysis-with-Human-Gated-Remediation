@@ -202,10 +202,62 @@ def read_incident(incident_id: str) -> dict:
 # one run
 # --------------------------------------------------------------------------- #
 
+TARGET_LOG_GROUPS = [
+    "/aws/lambda/sentry-capstone-api-gulsher",
+    "/aws/lambda/sentry-capstone-consumer-gulsher",
+]
+DLQ_NAMES = ["sentry-capstone-orders-dlq-gulsher"]
+
+_sqs = boto3.client("sqs", region_name=REGION)
+
+
+def isolate() -> None:
+    """Remove the previous scenario's evidence before the next one runs.
+
+    The agent's window is the incident time +/- 5 minutes, but a scenario takes
+    around 2.5 minutes end to end, so each window reaches back into its
+    predecessor. That is how a latency scenario and a malformed-payload scenario
+    both concluded "the consumer cannot reach an S3 bucket" — they were reading
+    the AccessDenied scenario's failure, four minutes earlier.
+
+    Deleting the log groups is blunt but total, and Lambda recreates them on the
+    next invocation. Spacing the scenarios out instead would need a five-minute
+    gap between each, which triples the length of a sweep.
+    """
+    for group in TARGET_LOG_GROUPS:
+        try:
+            _logs.delete_log_group(logGroupName=group)
+        except _logs.exceptions.ResourceNotFoundException:
+            pass                      # already gone; nothing to clear
+        except Exception as exc:
+            print(f"    warning: could not clear {group}: {exc}")
+
+
+def drain_dead_letter_queues() -> None:
+    """Empty the DLQs once, before a sweep starts.
+
+    Messages accumulate across days of testing, and unlike log debris this is
+    visible to EVERY scenario rather than only its neighbours: queue depth and
+    oldest-message age are metrics, not log lines, so no time window excludes
+    them. A run found 30 messages with an oldest age of three days, which is a
+    real and reasonable thing for an agent to treat as a downstream failure.
+    """
+    for name in DLQ_NAMES:
+        try:
+            url = _sqs.get_queue_url(QueueName=name)["QueueUrl"]
+            _sqs.purge_queue(QueueUrl=url)
+            print(f"  purged {name}")
+        except Exception as exc:
+            # PurgeQueue is rejected within 60s of a previous purge, which is
+            # not worth failing a sweep over.
+            print(f"  warning: could not purge {name}: {exc}")
+
+
 def run_scenario(scenario: sc.Scenario, run_index: int, verbose: bool = True) -> Result:
     label = f"{scenario.id} run {run_index + 1}"
     try:
         disarm_all()
+        isolate()
         time.sleep(SETTLE_S)
 
         if scenario.publish_version_first:
@@ -313,6 +365,13 @@ def main() -> int:
         selected = [sc.by_id(s.strip()) for s in args.scenarios.split(",")]
 
     print(f"Running {len(selected)} scenarios x {args.runs} runs\n")
+
+    # Once per sweep: PurgeQueue is rejected within 60 seconds of a previous
+    # purge, so per-scenario draining is not possible. Stale messages are also
+    # the one contamination source no time window excludes — depth and age are
+    # metrics, not log lines.
+    drain_dead_letter_queues()
+    print()
     started = time.time()
     results: list[Result] = []
 

@@ -61,11 +61,18 @@ GENUINE: list[Scenario] = [
         notes="KeyError on a missing nested field. Logs contain the trace.",
     ),
     Scenario(
-        id="S02", name="AccessDenied from a missing permission",
+        id="S02", name="Consumer depends on an S3 bucket that does not exist",
         chaos_mode="denied", alarm=ALARM_CONSUMER_ERRORS,
         expected_cause="config",
-        acceptable_causes=["code_defect"],
-        notes="Consumer role has no s3:GetObject. Genuine AWS AccessDenied.",
+        acceptable_causes=["code_defect", "external"],
+        notes="The consumer calls GetObject on a bucket that was never created, "
+              "so S3 answers NoSuchBucket. Named 'denied' and previously "
+              "described as an AccessDenied test, which it is not — a run "
+              "surfaced the difference when the agent explicitly rejected the "
+              "recent IAM changes as not matching the NoSuchBucket signature. "
+              "Worth keeping as-is: a missing dependency and a missing "
+              "permission are different diagnoses, and telling them apart is "
+              "the harder one.",
         fails_in="consumer"
     ),
     Scenario(
