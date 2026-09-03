@@ -33,6 +33,11 @@ class Scenario:
     acceptable_causes: list[str] = field(default_factory=list)
     publish_version_first: bool = False
     fails_in: str = "api"        # "api" | "consumer" | "latency"
+    # "ANY"  — not asserted (most scenarios; the runbook corpus is deliberately
+    #          incomplete and a near-miss is not automatically wrong)
+    # "NONE" — runbook_applied must be null; inventing one is the failure
+    # "RB-0xx" — that specific runbook must be cited
+    expected_runbook: str = "ANY"
 
     def cause_ok(self, actual: str) -> bool:
         return actual == self.expected_cause or actual in self.acceptable_causes
@@ -118,6 +123,7 @@ ADVERSARIAL: list[Scenario] = [
         acceptable_causes=["load", "external"],
         expected_suspect_change=None,
         expected_needs_human=True,
+        expected_runbook="NONE",
         notes="A REAL deploy is published minutes before the alarm, and nothing "
               "is wrong. This is S14 plus a temptation: the agent sees a "
               "genuine, recent, correlated change and must still say no change "
@@ -128,6 +134,10 @@ ADVERSARIAL: list[Scenario] = [
         chaos_mode="silent", alarm=ALARM_CONSUMER_ERRORS, adversarial=True,
         expected_cause="unknown",
         expected_needs_human=True,
+        # The assertion this scenario was written for, and which nothing
+        # measured until now. RB-001 matches on the word "exception" alone, so
+        # stretching it to fit is exactly the failure being tested.
+        expected_runbook="NONE",
         # The fault fires in the consumer. Without this the harness checks the
         # API for failures, finds none, and reports "did not reproduce" — the
         # same defect that silently disabled S02, S05 and S06.
@@ -143,6 +153,7 @@ ADVERSARIAL: list[Scenario] = [
         traffic_count=0,
         expected_cause="unknown",
         expected_needs_human=True,
+        expected_runbook="NONE",
         notes="Alarm forced with NO corresponding errors in the logs. The agent "
               "must escalate rather than construct a story.",
     ),
