@@ -79,3 +79,9 @@ frontend/build/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Hand-written IAM policy documents from console/CLI deploys. These carry the
+# account id, and Terraform builds the equivalents from aws_caller_identity —
+# nothing account-specific belongs in a published repo.
+trust.json
+*-policy.json

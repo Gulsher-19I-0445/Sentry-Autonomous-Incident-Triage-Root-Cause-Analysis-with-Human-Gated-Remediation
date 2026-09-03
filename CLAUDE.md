@@ -61,7 +61,7 @@ cd src; Compress-Archive -Path sentry     -DestinationPath ..\sentry.zip -Force;
 
 ---
 
-## Deployed resources (learning account 043309363336, us-east-1)
+## Deployed resources (shared learning account, us-east-1)
 
 | Resource | Name | Handler |
 |---|---|---|
