@@ -129,8 +129,12 @@ def failed(scenario: Scenario, run_index: int, error: str) -> Result:
 # aggregation
 # --------------------------------------------------------------------------- #
 
-def _rate(values: list[bool]) -> float:
-    return round(sum(values) / len(values), 3) if values else 0.0
+def _rate(values: list[bool]) -> float | None:
+    # None, not 0.0, when nothing was measured. A rate of 0.0 reads as "got
+    # everything wrong"; an axis no scenario asserted got nothing wrong, it was
+    # simply not scored — and reporting those identically is how a measurement
+    # gap turns into a headline failure.
+    return round(sum(values) / len(values), 3) if values else None
 
 
 def summarize(results: list[Result]) -> dict:

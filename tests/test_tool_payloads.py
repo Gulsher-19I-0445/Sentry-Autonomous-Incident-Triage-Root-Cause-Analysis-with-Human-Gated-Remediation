@@ -273,7 +273,28 @@ def test_query_filters_by_level():
 
 
 def test_query_omits_the_level_filter_for_all():
-    assert "filter level" not in logs._build_query("all", None)
+    assert "filter level =" not in logs._build_query("all", None)
+
+
+def test_unfiltered_query_excludes_routine_platform_lines():
+    """The row limit is applied by Insights, so noise has to be excluded in the
+    QUERY. Filtering it afterwards spends the budget fetching START/END lines
+    that are then discarded, leaving the agent two or three rows and a report
+    of insufficient evidence — which dropped abstention accuracy to 0.167."""
+    query = logs._build_query("all", None)
+
+    assert "ispresent(level)" in query
+    assert "Runtime.OutOfMemory" in query
+    # ...but the failure lines must survive, or S07 loses its only evidence.
+    assert "or @message like" in query
+
+
+def test_level_filtered_query_needs_no_noise_filter():
+    """level = 'ERROR' already excludes platform lines, which carry no level."""
+    query = logs._build_query("ERROR", None)
+
+    assert "filter level = 'ERROR'" in query
+    assert "ispresent" not in query
 
 
 def test_query_always_bounds_the_result_count():

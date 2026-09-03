@@ -75,6 +75,24 @@ TOOL_SPEC = {
 }
 
 
+# A platform line is only evidence when it reports a failure. START, END and a
+# routine REPORT say nothing the metrics tool does not say better, and they are
+# emitted for EVERY invocation — so keeping them crowds real errors out of the
+# result limit and invites the model to quote request ids back as findings.
+RUNTIME_FAILURE_MARKERS = (
+    "Runtime.OutOfMemory",
+    "Task timed out",
+    "Runtime exited",
+    "Status: error",
+    "errorType",
+    "Segmentation fault",
+)
+
+
+def _is_runtime_failure(raw: str) -> bool:
+    return any(marker in raw for marker in RUNTIME_FAILURE_MARKERS)
+
+
 def _escape(term: str) -> str:
     """Insights regex literals are /slash delimited/."""
     return term.replace("\\", "\\\\").replace("/", r"\/")
@@ -95,29 +113,20 @@ def _build_query(level: str | None, search_term: str | None) -> str:
     ]
     if level and level != "all":
         parts.append(f"filter level = '{level}'")
+    else:
+        # Drop routine platform chatter at QUERY time, not afterwards. The row
+        # limit is applied by Insights, so filtering later means the budget is
+        # spent fetching START/END lines that are then discarded — the agent
+        # ends up reasoning from two or three rows and reports insufficient
+        # evidence. Keep parsed application logs, plus the platform lines that
+        # actually report a failure (an OOM kill produces nothing else).
+        markers = "|".join(RUNTIME_FAILURE_MARKERS)
+        parts.append(f"filter ispresent(level) or @message like /{markers}/")
     if search_term:
         parts.append(f"filter @message like /{_escape(search_term)}/")
     parts.append("sort @timestamp desc")
     parts.append(f"limit {Config.LOG_QUERY_LIMIT}")
     return " | ".join(parts)
-
-
-# A platform line is only evidence when it reports a failure. START, END and a
-# routine REPORT say nothing the metrics tool does not say better, and they are
-# emitted for EVERY invocation — so keeping them crowds real errors out of the
-# result limit and invites the model to quote request ids back as findings.
-RUNTIME_FAILURE_MARKERS = (
-    "Runtime.OutOfMemory",
-    "Task timed out",
-    "Runtime exited",
-    "Status: error",
-    "errorType",
-    "Segmentation fault",
-)
-
-
-def _is_runtime_failure(raw: str) -> bool:
-    return any(marker in raw for marker in RUNTIME_FAILURE_MARKERS)
 
 
 def _flatten(results: list[list[dict]]) -> list[dict]:
