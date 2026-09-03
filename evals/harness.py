@@ -20,6 +20,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -35,7 +36,10 @@ REGION = "us-east-1"
 API_FN = "sentry-capstone-api-gulsher"
 AGENT_FN = "sentry-capstone-agent-gulsher"
 TABLE = "sentry-capstone-incidents-gulsher"
-ADMIN_TOKEN = "devtoken123"
+# Gates the endpoints that arm a failure mode on the target app. Read from
+# the environment so a real token is never written down here: Terraform
+# generates one per deployment (terraform output -raw target_admin_token).
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "devtoken123")
 _logs = boto3.client("logs", region_name=REGION)
 INGESTION_WAIT_S = 25      # CloudWatch logs lag; the agent retries once too
 SETTLE_S = 3
