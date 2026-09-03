@@ -102,6 +102,24 @@ def _build_query(level: str | None, search_term: str | None) -> str:
     return " | ".join(parts)
 
 
+# A platform line is only evidence when it reports a failure. START, END and a
+# routine REPORT say nothing the metrics tool does not say better, and they are
+# emitted for EVERY invocation — so keeping them crowds real errors out of the
+# result limit and invites the model to quote request ids back as findings.
+RUNTIME_FAILURE_MARKERS = (
+    "Runtime.OutOfMemory",
+    "Task timed out",
+    "Runtime exited",
+    "Status: error",
+    "errorType",
+    "Segmentation fault",
+)
+
+
+def _is_runtime_failure(raw: str) -> bool:
+    return any(marker in raw for marker in RUNTIME_FAILURE_MARKERS)
+
+
 def _flatten(results: list[list[dict]]) -> list[dict]:
     """Insights returns each row as [{'field': 'x', 'value': 'y'}, ...]."""
     rows = []
@@ -117,14 +135,20 @@ def _flatten(results: list[list[dict]]) -> list[dict]:
             row["message"] = truncate(row["message"], 300)
 
         # A row that parsed as JSON already carries everything @message holds,
-        # so keeping both would send each entry twice — on every turn. Keep the
-        # raw line only for rows the JSON fields could not parse, which is
-        # exactly the runtime's own output (OOM kills, timeouts, crashes).
+        # so keeping both would send each entry twice — on every turn.
         if "@message" in row:
             if row.get("level"):
                 row.pop("@message")
-            else:
+            elif _is_runtime_failure(row["@message"]):
+                # The runtime's own account of a failure it killed. For an OOM
+                # this is the ONLY record: the process dies before the handler
+                # can log anything.
                 row["@message"] = truncate(row["@message"], 300)
+            else:
+                # Routine platform chatter. Dropping the row entirely rather
+                # than just the field, because a row with no parsed fields and
+                # no failure marker carries nothing at all.
+                continue
 
         rows.append(row)
     return rows

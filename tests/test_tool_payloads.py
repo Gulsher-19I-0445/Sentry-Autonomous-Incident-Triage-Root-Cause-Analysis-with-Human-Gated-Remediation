@@ -86,6 +86,31 @@ def test_flatten_keeps_the_raw_line_for_runtime_output():
     assert "Runtime.OutOfMemory" in rows[0]["@message"]
 
 
+def test_flatten_drops_routine_platform_chatter():
+    """START and END are emitted for every invocation and say nothing the
+    metrics tool does not say better. Keeping them crowded real errors out of
+    the 15-row result limit and invited the model to quote request ids back as
+    findings — which is what pushed two scenarios past the output cap."""
+    rows = logs._flatten([
+        insights_row(**{"@message": "START RequestId: abc Version: $LATEST"}),
+        insights_row(**{"@message": "END RequestId: abc"}),
+        insights_row(**{"@message": "REPORT RequestId: abc Duration: 12 ms "
+                                    "Billed Duration: 13 ms Memory Size: 256 MB"}),
+    ])
+
+    assert rows == []
+
+
+def test_flatten_keeps_platform_lines_that_report_a_failure():
+    for line in (
+        "REPORT RequestId: a Status: error Error Type: Runtime.OutOfMemory",
+        "2026-09-03T06:00:00Z a Task timed out after 60.00 seconds",
+        "RequestId: a Error: Runtime exited with error: signal: killed",
+    ):
+        rows = logs._flatten([insights_row(**{"@message": line})])
+        assert len(rows) == 1, line
+
+
 def test_flatten_drops_the_raw_line_when_the_row_parsed():
     """Keeping both would send every structured entry twice, on every turn."""
     rows = logs._flatten([insights_row(**{

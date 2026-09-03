@@ -10,7 +10,11 @@ class Config:
     AGENT_MODEL_ID = os.environ.get("AGENT_MODEL_ID", "us.anthropic.claude-sonnet-5")
     EVAL_MODEL_ID = os.environ.get("EVAL_MODEL_ID",
                                    "us.anthropic.claude-haiku-4-5-20251001-v1:0")
-    MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "4096"))
+    # Caps the model's OUTPUT per turn. Hitting it truncates the RCA mid-JSON,
+    # which cannot be repaired and escalates the incident — an expensive way to
+    # lose an investigation that had already done all its work. 4096 was enough
+    # until noisy evidence started producing longer evidence lists.
+    MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "8192"))
     TEMPERATURE = float(os.environ.get("TEMPERATURE", "0"))
 
     # $ per 1M tokens, for the cost-per-incident metric. Update if rates change.
