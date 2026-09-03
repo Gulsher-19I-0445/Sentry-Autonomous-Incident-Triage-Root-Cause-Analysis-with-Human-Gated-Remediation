@@ -62,10 +62,15 @@ def _consumer_errors_since(start: int) -> int:
     q = _logs.start_query(
         logGroupNames=["/aws/lambda/sentry-capstone-consumer-gulsher"],
         startTime=start, endTime=int(time.time()),
+        # Insights `like /../` is case-SENSITIVE, and Lambda reports a kill as
+        # "Status: error\tError Type: Runtime.OutOfMemory" on the REPORT line —
+        # neither "Status: error" nor "Error Type" matches an /ERROR/ pattern.
+        # That is why the previous broadened filter still found nothing while
+        # four invocations were being killed.
         queryString=(
             "fields @timestamp, @message "
-            "| filter @message like /ERROR|Task timed out|Runtime exited|"
-            "errorMessage|Process exited/ "
+            "| filter @message like /ERROR|Runtime.OutOfMemory|Task timed out|"
+            "Runtime exited|Status: error/ "
             "| limit 20"
         ),
     )["queryId"]

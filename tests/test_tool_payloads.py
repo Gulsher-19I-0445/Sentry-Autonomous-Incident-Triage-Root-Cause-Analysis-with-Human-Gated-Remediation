@@ -72,6 +72,48 @@ def test_flatten_truncates_messages_harder_than_traces():
     assert len(rows[0]["message"]) < len(rows[0]["stack_trace"])
 
 
+def test_flatten_keeps_the_raw_line_for_runtime_output():
+    """A memory kill produces no application log — the process dies before the
+    handler can log — so Lambda's own REPORT line is the only evidence there is.
+    It is not JSON, so every named field comes back empty and the row would
+    otherwise be indistinguishable from any other platform line."""
+    report = ("REPORT RequestId: a96fa1ca  Duration: 1826.96 ms  "
+              "Memory Size: 256 MB  Max Memory Used: 256 MB  "
+              "Status: error  Error Type: Runtime.OutOfMemory")
+
+    rows = logs._flatten([insights_row(**{"@message": report})])
+
+    assert "Runtime.OutOfMemory" in rows[0]["@message"]
+
+
+def test_flatten_drops_the_raw_line_when_the_row_parsed():
+    """Keeping both would send every structured entry twice, on every turn."""
+    rows = logs._flatten([insights_row(**{
+        "@message": '{"level":"ERROR","message":"boom"}',
+        "level": "ERROR",
+        "message": "boom",
+    })])
+
+    assert "@message" not in rows[0]
+    assert rows[0]["message"] == "boom"
+
+
+def test_dedupe_keeps_distinct_runtime_lines_apart():
+    """Platform lines share every JSON field (they have none), so without the
+    raw line in the key an OOM kill and a routine START would collapse into one
+    group and the kill would vanish."""
+    rows = [
+        {"@message": "START RequestId: aaa Version: $LATEST"},
+        {"@message": "REPORT RequestId: aaa  Error Type: Runtime.OutOfMemory"},
+        {"@message": "START RequestId: bbb Version: $LATEST"},
+    ]
+
+    unique = logs._dedupe(rows)
+
+    assert len(unique) == 3
+    assert any("OutOfMemory" in u["@message"] for u in unique)
+
+
 def test_flatten_handles_an_empty_result_set():
     assert logs._flatten([]) == []
 

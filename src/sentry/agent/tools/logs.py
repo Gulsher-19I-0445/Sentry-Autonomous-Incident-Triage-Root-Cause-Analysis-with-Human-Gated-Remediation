@@ -82,8 +82,15 @@ def _escape(term: str) -> str:
 
 def _build_query(level: str | None, search_term: str | None) -> str:
     """Compose the query ourselves. Never accept a query string from the model."""
+    # @message is the raw line. Without it the runtime's own output — the
+    # REPORT line carrying "Error Type: Runtime.OutOfMemory", a timeout, a
+    # segfault — arrives as a row of empty fields, because those lines are not
+    # JSON and none of the named fields parse. A memory kill produces no
+    # application log at all (the process is killed before the handler can log),
+    # so this is the only way the agent can see one. _flatten drops it again for
+    # rows that did parse, so structured entries are not sent twice.
     parts = [
-        "fields @timestamp, level, service, message, correlation_id, "
+        "fields @timestamp, @message, level, service, message, correlation_id, "
         "error_type, stack_trace, order_id"
     ]
     if level and level != "all":
@@ -108,6 +115,17 @@ def _flatten(results: list[list[dict]]) -> list[dict]:
             row["stack_trace"] = truncate(row["stack_trace"])
         if "message" in row:
             row["message"] = truncate(row["message"], 300)
+
+        # A row that parsed as JSON already carries everything @message holds,
+        # so keeping both would send each entry twice — on every turn. Keep the
+        # raw line only for rows the JSON fields could not parse, which is
+        # exactly the runtime's own output (OOM kills, timeouts, crashes).
+        if "@message" in row:
+            if row.get("level"):
+                row.pop("@message")
+            else:
+                row["@message"] = truncate(row["@message"], 300)
+
         rows.append(row)
     return rows
 
@@ -127,8 +145,11 @@ def _dedupe(rows: list[dict]) -> list[dict]:
     groups: dict[tuple, dict] = {}
     for row in rows:
         trace = row.get("stack_trace") or ""
+        # Platform lines have none of the JSON fields, so without @message in
+        # the key every runtime line — START, END, REPORT, an OOM kill — would
+        # collapse into a single indistinguishable group.
         key = (row.get("level"), row.get("error_type"),
-               row.get("message"), trace[:200])
+               row.get("message"), trace[:200], row.get("@message"))
         if key in groups:
             g = groups[key]
             g["occurrences"] += 1
