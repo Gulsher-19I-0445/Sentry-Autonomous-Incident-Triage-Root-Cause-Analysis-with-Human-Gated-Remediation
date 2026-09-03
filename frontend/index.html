@@ -1,0 +1,244 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sentry — incident triage</title>
+<!--
+  Deliberately one file with no build step and no framework, matching the
+  project's stdlib-only stance. It talks to the approval gate's Function URL
+  and holds the token in sessionStorage: the token is a shared secret, not an
+  identity, so it lives no longer than the tab.
+-->
+<style>
+  :root {
+    --bg: #fbfaf8; --panel: #fff; --line: #e4e0d8; --ink: #23201c;
+    --muted: #6b655c; --accent: #8a5a2b; --ok: #2f6b4f; --warn: #9a6a1b;
+    --bad: #a33a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171614; --panel: #201e1b; --line: #35322d; --ink: #eae6df;
+      --muted: #9b948a; --accent: #d79b62; --ok: #6fbf95; --warn: #d8ab5a;
+      --bad: #e0806e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  header {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  h1 { font-size: 16px; margin: 0 auto 0 0; letter-spacing: .2px; }
+  h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  input, select, button {
+    font: inherit; padding: 6px 10px; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--ink);
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .primary { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .danger  { background: var(--bad); border-color: var(--bad); color: #fff; }
+  main { padding: 18px 20px; max-width: 1100px; margin: 0 auto; }
+  .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .pill {
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px;
+    font-size: 12.5px; color: var(--muted); background: var(--panel);
+  }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .id { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted); }
+  .status {
+    font-size: 11.5px; font-weight: 600; letter-spacing: .4px;
+    padding: 2px 8px; border-radius: 4px; border: 1px solid currentColor;
+  }
+  .s-PENDING_APPROVAL { color: var(--warn); }
+  .s-EXECUTED, .s-APPROVED, .s-CLOSED { color: var(--ok); }
+  .s-FAILED, .s-REJECTED { color: var(--bad); }
+  .s-ESCALATED, .s-INFORMATIONAL, .s-INVESTIGATING, .s-NEW { color: var(--muted); }
+  .summary { margin: 8px 0; }
+  .meta { color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 13.5px; }
+  ul.evidence { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
+  ul.evidence li { margin-bottom: 4px; }
+  .actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+  .note {
+    font-size: 13px; color: var(--muted); border-left: 2px solid var(--line);
+    padding-left: 10px; margin-top: 10px;
+  }
+  .empty, .error { color: var(--muted); padding: 30px 0; text-align: center; }
+  .error { color: var(--bad); }
+  code { font-family: ui-monospace, monospace; font-size: 12.5px; }
+</style>
+
+<header>
+  <h1>Sentry <small>incident triage</small></h1>
+  <input id="url" placeholder="approval gate URL" size="34">
+  <input id="token" placeholder="approval token" type="password" size="18">
+  <select id="filter">
+    <option value="PENDING_APPROVAL">Awaiting approval</option>
+    <option value="all">All incidents</option>
+    <option value="ESCALATED">Escalated</option>
+    <option value="INFORMATIONAL">Informational</option>
+    <option value="EXECUTED,APPROVED,CLOSED">Actioned</option>
+    <option value="FAILED,REJECTED">Failed / rejected</option>
+  </select>
+  <button id="refresh">Refresh</button>
+</header>
+
+<main>
+  <div class="counts" id="counts"></div>
+  <div id="list"><p class="empty">Enter the gate URL and token, then refresh.</p></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = window.sessionStorage;
+
+// Restore between refreshes, but never persist the token beyond the tab.
+$("url").value = store.getItem("gate_url") || "";
+$("token").value = store.getItem("gate_token") || "";
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function call(path, options = {}) {
+  const base = $("url").value.trim().replace(/\/$/, "");
+  const token = $("token").value.trim();
+  if (!base || !token) throw new Error("Set the gate URL and token first.");
+  store.setItem("gate_url", base);
+  store.setItem("gate_token", token);
+
+  const res = await fetch(base + path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      "x-approval-token": token,
+      "x-actor": "dashboard",
+      ...(options.headers || {}),
+    },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+function confidenceNote(c) {
+  if (c == null) return "";
+  const n = Number(c);
+  // Surfaced because a confident wrong answer is the dangerous quadrant, and
+  // the operator is the check on it.
+  if (n < 0.5) return " — low confidence, treat as a hint";
+  if (n >= 0.85) return " — high confidence, still verify the evidence";
+  return "";
+}
+
+function card(i) {
+  const pending = i.status === "PENDING_APPROVAL";
+  const conf = i.confidence == null ? "—" : Number(i.confidence).toFixed(2);
+
+  const evidence = (i.evidence || []).length
+    ? `<details><summary>Evidence (${i.evidence.length})</summary>
+         <ul class="evidence">${i.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
+       </details>` : "";
+
+  let outcome = "";
+  if (i.execution_result) {
+    const r = i.execution_result;
+    outcome = `<div class="note"><b>Executed:</b> ${esc(r.action)}
+      ${r.from_version ? `— version ${esc(r.from_version)} → ${esc(r.to_version)}` : ""}
+      ${r.undo ? `<br>Undo: <code>${esc(r.undo)}</code>` : ""}</div>`;
+  } else if (i.rejection_reason) {
+    outcome = `<div class="note"><b>Rejected</b> by ${esc(i.rejected_by)}: ${esc(i.rejection_reason)}</div>`;
+  } else if (i.escalation_reason) {
+    outcome = `<div class="note"><b>Escalated:</b> ${esc(i.escalation_reason)}</div>`;
+  } else if (i.failure_reason) {
+    outcome = `<div class="note"><b>Failed:</b> ${esc(i.failure_reason)}</div>`;
+  }
+
+  const actions = pending ? `
+    <div class="actions" data-id="${esc(i.incident_id)}">
+      <button class="primary approve">Approve ${esc(i.proposed_remediation)}</button>
+      <button class="danger reject">Reject</button>
+      <span class="msg"></span>
+    </div>` : "";
+
+  return `<article class="card">
+    <div class="row">
+      <span class="status s-${esc(i.status)}">${esc(i.status)}</span>
+      <span class="id">${esc(i.incident_id)}</span>
+      <span class="id">${esc(i.alarm_name || "")}</span>
+    </div>
+    <p class="summary">${esc(i.summary || "No summary.")}</p>
+    <div class="meta">
+      <span><b>${esc(i.root_cause || "—")}</b> cause</span>
+      <span>confidence <b>${conf}</b>${esc(confidenceNote(i.confidence))}</span>
+      <span>suspect <b>${esc(i.suspect_change || "none")}</b></span>
+      <span>component <b>${esc(i.affected_component || "—")}</b></span>
+      <span>${esc(i.tool_calls)} tool calls</span>
+      <span>$${esc(i.cost_usd || "0")}</span>
+      ${i.runbook_applied ? `<span>runbook <b>${esc(i.runbook_applied)}</b></span>` : ""}
+    </div>
+    ${i.remediation_detail ? `<div class="note">${esc(i.remediation_detail)}</div>` : ""}
+    ${evidence}${outcome}${actions}
+  </article>`;
+}
+
+async function load() {
+  const list = $("list");
+  list.innerHTML = `<p class="empty">Loading…</p>`;
+  $("counts").innerHTML = "";
+  try {
+    const data = await call(`/incidents?status=${encodeURIComponent($("filter").value)}`);
+    $("counts").innerHTML = Object.entries(data.counts_by_status || {})
+      .map(([s, n]) => `<span class="pill">${esc(s)} · ${n}</span>`).join("");
+    list.innerHTML = data.incidents.length
+      ? data.incidents.map(card).join("")
+      : `<p class="empty">Nothing here.</p>`;
+  } catch (err) {
+    list.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+async function act(box, verb) {
+  const id = box.dataset.id;
+  const msg = box.querySelector(".msg");
+  let reason = null;
+  if (verb === "reject") {
+    reason = prompt("Why is this being rejected? (recorded on the incident)");
+    if (reason === null) return;
+  }
+  box.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  msg.textContent = "Working…";
+  try {
+    await call(`/incidents/${encodeURIComponent(id)}/${verb}`, {
+      method: "POST",
+      body: JSON.stringify({ actor: "dashboard", reason }),
+    });
+    msg.textContent = verb === "approve" ? "Approved — executor invoked." : "Rejected.";
+    // The executor runs asynchronously, so give it a moment before re-reading.
+    setTimeout(load, 1500);
+  } catch (err) {
+    msg.textContent = err.message;
+    box.querySelectorAll("button").forEach((b) => (b.disabled = false));
+  }
+}
+
+$("list").addEventListener("click", (e) => {
+  const box = e.target.closest(".actions");
+  if (!box) return;
+  if (e.target.classList.contains("approve")) act(box, "approve");
+  if (e.target.classList.contains("reject")) act(box, "reject");
+});
+
+$("refresh").addEventListener("click", load);
+$("filter").addEventListener("change", load);
+if ($("url").value && $("token").value) load();
+</script>

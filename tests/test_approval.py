@@ -126,6 +126,128 @@ def test_the_list_omits_the_trace(monkeypatch, pending):
     assert "trace" not in entry
 
 
+# --------------------------------------------------------------------------- #
+# the dashboard's view
+# --------------------------------------------------------------------------- #
+
+def test_default_listing_is_the_approval_queue(monkeypatch, pending):
+    """The common question is "what needs me?", so that is the default."""
+    asked = []
+    monkeypatch.setattr(gate, "list_by_status",
+                        lambda s, **k: asked.append(s.value) or [pending])
+
+    gate.handler(request(), None)
+
+    assert asked == ["PENDING_APPROVAL"]
+
+
+def test_status_all_walks_every_status(monkeypatch, pending):
+    from sentry.common.incidents import Status
+
+    asked = []
+    monkeypatch.setattr(gate, "list_by_status",
+                        lambda s, **k: asked.append(s.value) or [])
+
+    event = request(path="/incidents")
+    event["queryStringParameters"] = {"status": "all"}
+    gate.handler(event, None)
+
+    assert asked == [s.value for s in Status]
+
+
+def test_a_comma_list_of_statuses_is_supported(monkeypatch):
+    """The dashboard groups outcomes — "actioned" is three statuses."""
+    asked = []
+    monkeypatch.setattr(gate, "list_by_status",
+                        lambda s, **k: asked.append(s.value) or [])
+
+    event = request(path="/incidents")
+    event["queryStringParameters"] = {"status": "EXECUTED,APPROVED,CLOSED"}
+    gate.handler(event, None)
+
+    assert sorted(asked) == ["APPROVED", "CLOSED", "EXECUTED"]
+
+
+def test_an_unknown_status_is_rejected_with_the_valid_set(monkeypatch):
+    monkeypatch.setattr(gate, "list_by_status", lambda s, **k: [])
+
+    event = request(path="/incidents")
+    event["queryStringParameters"] = {"status": "MADE_UP"}
+    response = gate.handler(event, None)
+
+    assert response["statusCode"] == 400
+    assert "PENDING_APPROVAL" in body_of(response)["valid"]
+
+
+def test_the_listing_reports_counts_per_status(monkeypatch, pending):
+    executed = {**pending, "incident_id": "done", "status": "EXECUTED"}
+    monkeypatch.setattr(gate, "list_by_status",
+                        lambda s, **k: [pending] if s.value == "PENDING_APPROVAL"
+                        else ([executed] if s.value == "EXECUTED" else []))
+
+    event = request(path="/incidents")
+    event["queryStringParameters"] = {"status": "all"}
+    counts = body_of(gate.handler(event, None))["counts_by_status"]
+
+    assert counts == {"PENDING_APPROVAL": 1, "EXECUTED": 1}
+
+
+def test_the_summary_carries_the_outcome_of_a_finished_incident(monkeypatch, pending):
+    """A dashboard showing only a status word cannot tell an operator what was
+    actually done, or how to undo it."""
+    done = {**pending, "status": "EXECUTED",
+            "approved_by": "gulsher",
+            "execution_result": {"action": "alias_rollback", "from_version": "3",
+                                 "to_version": "2", "undo": "aws lambda ..."}}
+    monkeypatch.setattr(gate, "list_by_status", lambda s, **k: [done])
+
+    entry = body_of(gate.handler(request(), None))["incidents"][0]
+
+    assert entry["approved_by"] == "gulsher"
+    assert entry["execution_result"]["to_version"] == "2"
+
+
+def test_the_summary_carries_evidence_and_tool_count(monkeypatch, pending):
+    pending["rca"]["evidence"] = ["14 KeyErrors", "invocations flat"]
+    pending["trace"]["steps"] = [{"tool": "search_logs"}, {"tool": "get_metrics"}]
+    monkeypatch.setattr(gate, "list_by_status", lambda s, **k: [pending])
+
+    entry = body_of(gate.handler(request(), None))["incidents"][0]
+
+    assert len(entry["evidence"]) == 2
+    assert entry["tool_calls"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# CORS
+# --------------------------------------------------------------------------- #
+
+def test_preflight_needs_no_token():
+    """A browser sends OPTIONS with no custom headers, so requiring auth here
+    would block the dashboard before it could ever authenticate."""
+    response = gate.handler(request("OPTIONS", "/incidents", token=None), None)
+
+    assert response["statusCode"] == 204
+    assert response["headers"]["access-control-allow-origin"]
+
+
+def test_cors_headers_are_on_every_response(monkeypatch, pending):
+    monkeypatch.setattr(gate, "list_by_status", lambda s, **k: [pending])
+
+    for response in (gate.handler(request(), None),
+                     gate.handler(request(token="wrong"), None),
+                     gate.handler(request(path="/nope"), None)):
+        assert "access-control-allow-origin" in response["headers"]
+
+
+def test_preflight_permits_the_headers_the_dashboard_sends():
+    allowed = gate.handler(request("OPTIONS", "/incidents", token=None),
+                           None)["headers"]["access-control-allow-headers"]
+
+    for header in ("x-approval-token", "x-actor", "content-type"):
+        assert header in allowed
+
+
 def test_fetching_one_incident_returns_the_full_record(monkeypatch, pending):
     """This is the view an operator uses to check the agent's reasoning."""
     monkeypatch.setattr(gate, "get_incident", lambda _id: pending)

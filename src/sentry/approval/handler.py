@@ -42,10 +42,21 @@ EXECUTOR_FUNCTION = os.environ.get("EXECUTOR_FUNCTION", "")
 APPROVAL_TOKEN = os.environ.get("APPROVAL_TOKEN", "")
 
 
+# The dashboard is a static page served from somewhere else (a file:// URL
+# during development), so every response needs CORS or the browser discards it
+# before any JS runs. The token still gates access — CORS is not a security
+# boundary, it just decides whose JavaScript may read the reply.
+CORS_HEADERS = {
+    "access-control-allow-origin": os.environ.get("ALLOWED_ORIGIN", "*"),
+    "access-control-allow-headers": "content-type,x-approval-token,x-actor",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+}
+
+
 def _response(status: int, body: dict) -> dict:
     return {
         "statusCode": status,
-        "headers": {"content-type": "application/json"},
+        "headers": {"content-type": "application/json", **CORS_HEADERS},
         "body": json.dumps(body, default=str),
     }
 
@@ -79,7 +90,19 @@ def _summarise(incident: dict) -> dict:
         "affected_component": rca.get("affected_component"),
         "proposed_remediation": rca.get("proposed_remediation"),
         "remediation_detail": rca.get("remediation_detail"),
+        "needs_human_investigation": rca.get("needs_human_investigation"),
+        "runbook_applied": rca.get("runbook_applied"),
+        "evidence": rca.get("evidence") or [],
         "cost_usd": incident.get("cost_usd"),
+        "tool_calls": len((incident.get("trace") or {}).get("steps") or []),
+        # Only present once a human has acted; the dashboard uses them to show
+        # who did what rather than just a status word.
+        "approved_by": incident.get("approved_by"),
+        "rejected_by": incident.get("rejected_by"),
+        "rejection_reason": incident.get("rejection_reason"),
+        "execution_result": incident.get("execution_result"),
+        "escalation_reason": incident.get("escalation_reason"),
+        "failure_reason": incident.get("failure_reason"),
     }
 
 
@@ -141,8 +164,47 @@ def _reject(incident_id: str, actor: str, reason: str | None) -> dict:
                            "status": Status.REJECTED.value})
 
 
+def _dashboard_view(status_filter: str) -> dict:
+    """Incidents for the dashboard, newest first.
+
+    `all` walks every status rather than scanning once, because the incidents
+    table has no status index — at capstone volume a handful of filtered scans
+    is cheaper than adding a GSI, and the cost of getting that wrong is a
+    slower page rather than a wrong answer.
+    """
+    if status_filter.lower() == "all":
+        statuses = list(Status)
+    else:
+        wanted = {s.strip().upper() for s in status_filter.split(",") if s.strip()}
+        statuses = [s for s in Status if s.value in wanted]
+        if not statuses:
+            return {"error": f"unknown status {status_filter!r}",
+                    "valid": [s.value for s in Status]}
+
+    incidents: list[dict] = []
+    for status in statuses:
+        incidents.extend(list_by_status(status))
+
+    incidents.sort(key=lambda i: i.get("triggered_at") or 0, reverse=True)
+
+    counts: dict[str, int] = {}
+    for incident in incidents:
+        key = incident.get("status") or "UNKNOWN"
+        counts[key] = counts.get(key, 0) + 1
+
+    return {
+        "count": len(incidents),
+        "counts_by_status": counts,
+        "incidents": [_summarise(i) for i in incidents],
+    }
+
+
 def handler(event: dict, context) -> dict:
     method, path = _route(event)
+
+    # Preflight carries no auth header by design — answering it is not access.
+    if method == "OPTIONS":
+        return _response(204, {})
 
     if not _authorised(event):
         return _response(403, {"error": "forbidden"})
@@ -157,10 +219,11 @@ def handler(event: dict, context) -> dict:
     actor = body.get("actor") or event.get("headers", {}).get("x-actor") or "unknown"
 
     if method == "GET" and path.rstrip("/") == "/incidents":
-        pending = list_by_status(Status.PENDING_APPROVAL)
-        pending.sort(key=lambda i: i.get("triggered_at") or 0, reverse=True)
-        return _response(200, {"count": len(pending),
-                               "incidents": [_summarise(i) for i in pending]})
+        params = event.get("queryStringParameters") or {}
+        # Defaults to the approval queue: the common case is "what needs me?",
+        # and the dashboard asks for `all` explicitly when it wants history.
+        view = _dashboard_view(params.get("status") or Status.PENDING_APPROVAL.value)
+        return _response(400 if "error" in view else 200, view)
 
     if path.startswith("/incidents/"):
         rest = path.removeprefix("/incidents/").rstrip("/")
