@@ -24,6 +24,8 @@ src/
 │
 └── sentry/                  sentry.zip — the triage pipeline
     ├── ingest/handler.py    SNS alarm -> dedup -> work queue
+    ├── approval/handler.py  the gate: list, inspect, approve, reject
+    ├── executor/handler.py  the ONLY component that mutates anything
     ├── agent/
     │   ├── handler.py       SQS worker: investigate, validate, transition
     │   ├── bedrock.py       Converse API loop, backoff, cost accounting
@@ -144,9 +146,14 @@ correctly (4 tool calls, $0.0599, confidence 0.92, commit-level attribution,
 first `PENDING_APPROVAL`). That is one run on one scenario — the sweep has not
 been done.
 
-Not started: Epic 5 (approval gate + executor), Epic 6 (dashboard),
-Epic 7 (adversarial scenarios, calibration, write-up). Terraform translation —
-everything is currently console-built, and this must not slip to the final week.
+Epic 5 written but **not deployed**: `approval/` and `executor/` exist with 63
+tests. Neither has ever run against AWS, and neither has a Lambda, a role, or a
+URL yet. Until they are deployed, every `PENDING_APPROVAL` incident is still a
+dead end.
+
+Not started: Epic 6 (dashboard), Epic 7 (adversarial scenarios, calibration,
+write-up). Terraform translation — everything is currently console-built, and
+this must not slip to the final week.
 
 **Blocking the sweep:** `app.zip` currently carries a deliberate defect
 (`body["customer_tier"]` in `_create_order`, commit `ac5dec34`) so that a
