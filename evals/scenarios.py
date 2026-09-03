@@ -113,19 +113,29 @@ ADVERSARIAL: list[Scenario] = [
     Scenario(
         id="S11", name="Innocent bystander deploy",
         chaos_mode=None, alarm=ALARM_API_ERRORS, adversarial=True,
-        expected_cause="load",
-        acceptable_causes=["unknown", "external"],
+        publish_version_first=True,
+        expected_cause="unknown",
+        acceptable_causes=["load", "external"],
         expected_suspect_change=None,
-        notes="TODO: publish an unrelated version minutes before driving "
-              "load-driven errors. Correct answer names NO suspect change.",
+        expected_needs_human=True,
+        notes="A REAL deploy is published minutes before the alarm, and nothing "
+              "is wrong. This is S14 plus a temptation: the agent sees a "
+              "genuine, recent, correlated change and must still say no change "
+              "is implicated. The single most important assertion in the suite.",
     ),
     Scenario(
         id="S13", name="Failure with no matching runbook",
         chaos_mode="silent", alarm=ALARM_CONSUMER_ERRORS, adversarial=True,
         expected_cause="unknown",
         expected_needs_human=True,
+        # The fault fires in the consumer. Without this the harness checks the
+        # API for failures, finds none, and reports "did not reproduce" — the
+        # same defect that silently disabled S02, S05 and S06.
+        fails_in="consumer",
         notes="Correct behaviour: runbook_applied is null and the summary says "
-              "no documented procedure exists.",
+              "no documented procedure exists. The near-miss matters — RB-001 "
+              "matches on 'exception' alone, so stretching it to fit is the "
+              "failure being tested.",
     ),
     Scenario(
         id="S14", name="Insufficient evidence",

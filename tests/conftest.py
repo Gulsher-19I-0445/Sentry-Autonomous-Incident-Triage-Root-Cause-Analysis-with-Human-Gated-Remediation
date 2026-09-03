@@ -27,6 +27,13 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+# The eval definitions are ground truth for the whole project and are worth the
+# same offline checking as the pipeline. They live outside src/ because they
+# never ship to Lambda.
+EVALS = Path(__file__).resolve().parent.parent / "evals"
+if str(EVALS) not in sys.path:
+    sys.path.insert(0, str(EVALS))
+
 # A profile name would send botocore looking for a real config file.
 for _var in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
     os.environ.pop(_var, None)
