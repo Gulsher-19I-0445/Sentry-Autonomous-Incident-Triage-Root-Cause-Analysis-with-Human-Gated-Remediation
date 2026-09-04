@@ -65,8 +65,15 @@ class Config:
     OWN_RESOURCES = [
         r.strip() for r in os.environ.get(
             "OWN_RESOURCES",
+            # Every Sentry component, including the ones added after this list
+            # was first written. A run surfaced the gap: the agent reported
+            # "IAM role-policy updates on approval/executor roles" as the only
+            # recent changes, having read the pipeline's own deployment as
+            # candidate evidence for a target-app failure.
             "sentry-capstone-agent-gulsher,"
             "sentry-capstone-ingest-gulsher,"
+            "sentry-capstone-executor-gulsher,"
+            "sentry-capstone-approval-gulsher,"
             "sentry-capstone-work-gulsher,"
             "sentry-capstone-incidents-gulsher",
         ).split(",") if r.strip()

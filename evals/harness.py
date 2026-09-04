@@ -242,15 +242,44 @@ def drain_dead_letter_queues() -> None:
     them. A run found 30 messages with an oldest age of three days, which is a
     real and reasonable thing for an agent to treat as a downstream failure.
     """
+    purged = False
     for name in DLQ_NAMES:
         try:
             url = _sqs.get_queue_url(QueueName=name)["QueueUrl"]
             _sqs.purge_queue(QueueUrl=url)
             print(f"  purged {name}")
+            purged = True
         except Exception as exc:
             # PurgeQueue is rejected within 60s of a previous purge, which is
             # not worth failing a sweep over.
             print(f"  warning: could not purge {name}: {exc}")
+
+    if purged:
+        # PurgeQueue is asynchronous and documented to take up to 60 seconds.
+        # A three-second settle was not enough: a sweep that printed "purged"
+        # still had the agent reporting a backlog of twenty messages nearly
+        # three days old, because the first scenario ran before the delete
+        # finished. Wait for depth to actually reach zero rather than assuming.
+        print("  waiting for the purge to take effect", end="", flush=True)
+        deadline = time.time() + 70
+        while time.time() < deadline:
+            time.sleep(5)
+            print(".", end="", flush=True)
+            depths = []
+            for name in DLQ_NAMES:
+                try:
+                    url = _sqs.get_queue_url(QueueName=name)["QueueUrl"]
+                    attrs = _sqs.get_queue_attributes(
+                        QueueUrl=url,
+                        AttributeNames=["ApproximateNumberOfMessages"],
+                    )["Attributes"]
+                    depths.append(int(attrs["ApproximateNumberOfMessages"]))
+                except Exception:
+                    depths.append(0)
+            if not any(depths):
+                print(" clear")
+                return
+        print(" still draining; continuing anyway")
 
 
 def run_scenario(scenario: sc.Scenario, run_index: int, verbose: bool = True) -> Result:
