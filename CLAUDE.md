@@ -136,46 +136,49 @@ someone hitting a `/break` endpoint.
 
 ## Where it stands
 
-Done: Epics 0–3 (environment, target app, chaos injection, alarm pipeline,
-ingest with dedup, agent core with four tools). SEN-21 harness written. Unit
-test suite + CI. GitHub wired into `get_recent_changes`.
+**Built and tested offline:** the target app and its fault injection, the alarm
+pipeline, ingest with dedup, the agent and its four tools, the approval gate,
+the executor, the operator dashboard, the eval harness and scoring, 479 unit
+tests with CI, and a Terraform config describing the whole system.
 
-In progress: SEN-22/23 — getting a clean baseline across the genuine scenarios.
-A full end-to-end run on 2026-09-02 diagnosed a real code-caused failure
-correctly (4 tool calls, $0.0599, confidence 0.92, commit-level attribution,
-first `PENDING_APPROVAL`). That is one run on one scenario — the sweep has not
-been done.
+**Measured:** baseline of 15 investigations across 9 scenarios on 2026-09-03 —
+see `EVALUATION.md`. **Zero false attributions across all 15.** S11 — a real
+Lambda version published minutes before the alarm, nothing actually wrong —
+answered "no change is implicated" three times out of three. Mean $0.129 per
+investigation, 7.5 tool calls, 51 seconds.
 
-Epic 5 written but **not deployed**: `approval/` and `executor/` exist with 63
-tests. Neither has ever run against AWS, and neither has a Lambda, a role, or a
-URL yet. Until they are deployed, every `PENDING_APPROVAL` incident is still a
-dead end.
+Every repeated scenario was perfectly consistent: same cause, near-identical
+confidence. That resolves the "not reproducible run to run" concern below, at
+least for these scenarios.
 
-Not started: Epic 6 (dashboard), Epic 7 (adversarial scenarios, calibration,
-write-up). Terraform translation — everything is currently console-built, and
-this must not slip to the final week.
+**Written but never run against AWS:**
 
-**Blocking the sweep:** `app.zip` currently carries a deliberate defect
-(`body["customer_tier"]` in `_create_order`, commit `ac5dec34`) so that a
-code-caused failure could be tested end to end. Every order request 500s
-regardless of chaos mode, so no genuine scenario can run until it is reverted
-and redeployed.
+- the approval gate and executor (63 offline tests, no Lambda deployed)
+- the dashboard (`frontend/index.html`, never rendered live data)
+- the Terraform config (`terraform validate` passes; `plan` has never run
+  against real credentials)
+
+Those three are the gap between "the code exists" and "the system works", and
+none of them is covered by the baseline.
+
+**Not started:** the write-up. Terraform now exists but has not replaced the
+console-built stack — it deploys a parallel one under a different `owner`.
 
 ---
 
 ## Open problems
 
-**Cost per investigation.** Was ~$0.13–0.22; now **$0.0599** (4 tool calls,
-14,055 input / 1,181 output) against a $0.03–0.05 target. What actually moved it:
+**Cost per investigation.** Was ~$0.13–0.22; the measured baseline is **$0.129
+mean** across 15 investigations (range $0.086–$0.188, 7.5 tool calls, 51s).
+A single easy case reached $0.0599, but that is not representative — cost tracks
+evidence ambiguity, and ruling candidates out before abstaining is the expensive
+part. What moved it:
 
-- log entries deduplicated before returning (identical stack traces were resent
-  in full on every turn)
-- metric series in a dense `{start, period, values[]}` encoding instead of a
-  list of `{timestamp, value}` objects
-- the traffic comparison computed in code (`load_vs_defect`) so the model does
-  not spend a turn deriving it
-- CloudTrail filtered to target-app resources only — the pipeline's own deploys
-  were 74% of the change payload during a sweep
+- log entries deduplicated before returning
+- metric series in a dense `{start, period, values[]}` encoding
+- the traffic comparison computed in code (`load_vs_defect`)
+- CloudTrail filtered to target-app resources only
+- routine platform lines excluded in the query rather than after it
 
 The earlier failed experiment is still worth remembering: replacing raw metric
 series with summary statistics alone made things *worse* (6 -> 11 calls,
@@ -187,31 +190,40 @@ with one payload each is near the floor. Input is 70% of cost and most of it is
 the prefix being resent each turn; Bedrock Converse `cachePoint` blocks price
 that at ~0.1x. Estimated landing point ~$0.035.
 
-**Over-escalation — largely resolved, and the cause was not the model.**
-`validate()` rejected an RCA that both escalates and proposes a remediation, but
-`SCHEMA_DESCRIPTION` never stated that rule, so the model could only discover it
-by failing validation and paying a repair round trip. The field name compounded
-it: `needs_human_investigation` reads as "should a human review this", which in
-a human-gated system is always true. Both are now stated explicitly in the
-prompt. Confidence went 0.4 -> 0.82 -> 0.92 across successive runs.
+**Over-escalation — measured, and it splits in two.** On adversarial scenarios,
+where evidence genuinely is absent, abstention is 6/6 correct. On genuine
+scenarios it is 1/6: the agent identifies the cause and escalates anyway,
+because nothing it can see explains what *changed* to trigger the fault. The
+chaos flag lives in DynamoDB, invisible to logs, metrics, CloudTrail and git.
+That figure measures scenario design, not judgment. See `EVALUATION.md`.
+
+An earlier and separate cause was a real defect: `validate()` rejected an RCA
+that both escalates and proposes a remediation, but `SCHEMA_DESCRIPTION` never
+stated the rule, so the model could only discover it by failing validation and
+paying a repair round trip.
 
 **Rule of thumb this produced:** every rule `validate()` enforces must appear in
 `SCHEMA_DESCRIPTION`. A validator that knows something the prompt does not is a
 repair round trip you are paying for on every run.
 
-**Test-run contamination.** The incident window catches debris from previous
-test runs, so the agent finds unrelated failures from other scenarios. Window
-narrowed to ±5 minutes; consider deleting the target app log groups between
-sweeps.
+**Test-run contamination — fixed, and it was worse than it looked.** Scenarios
+run ~2.5 minutes apart against a ±5 minute evidence window, so every window
+reached into its predecessor; two scenarios once diagnosed a third's failure.
+The harness now clears the target log groups between scenarios and drains the
+dead-letter queues before a sweep. Note metrics cannot be purged — only logs —
+so leave a few minutes between sweeps.
 
-**Abstention is now untested under the new conditions.** With GitHub live, every
-genuine scenario becomes a false-attribution test: the agent sees recent commits
-touching the failing file while a DynamoDB flag is the real cause. Correctly
-answering "no change is implicated" there is the harder half of the thesis and
-has never been run with commits visible.
+**Two scenarios do not test what they claim.** S02 is documented as an
+`AccessDenied` test but produces `NoSuchBucket` — the bucket was never created.
+S13 is documented as a minimal-evidence test but raises an ordinary
+`RuntimeError` with a full traceback, which is why it answers `code_defect`
+consistently rather than `unknown`. The agent surfaced the first of these
+itself. Both need fixing or relabelling before the next sweep.
 
-**Results are not reproducible run to run.** Sonnet 5 rejects `temperature`, so
-every number above is n=1. Run three times before quoting anything.
+**Reproducibility — better than expected.** Sonnet 5 rejects `temperature`, so
+run-to-run stability could not be assumed. In practice every repeated scenario
+gave the same cause and near-identical confidence across three runs. Still worth
+repeating anything before quoting it, but the concern did not materialise.
 
 ---
 
