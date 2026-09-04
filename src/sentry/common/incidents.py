@@ -193,3 +193,31 @@ def list_by_status(status: Status, limit: int = 50) -> list[dict]:
         Limit=limit,
     )
     return [_clean(i) for i in resp.get("Items", [])]
+
+def list_all(limit: int = 500) -> list[dict]:
+    """Every incident, newest activity first.
+
+    The dashboard groups by status itself, so asking DynamoDB once and grouping
+    in code beats one filtered scan per status — the board wants all ten, and
+    with auto-refresh that was roughly 120 scans a minute.
+
+    This also paginates, which `list_by_status` does not. `Limit` on a scan caps
+    items EXAMINED, not returned, so a filtered scan over a table larger than
+    the limit silently omits matches with no error and no LastEvaluatedKey
+    handling to notice it.
+    """
+    items: list[dict] = []
+    kwargs: dict[str, Any] = {}
+
+    while len(items) < limit:
+        resp = _table.scan(**kwargs)
+        items.extend(_clean(i) for i in resp.get("Items", []))
+
+        key = resp.get("LastEvaluatedKey")
+        if not key:
+            break
+        kwargs["ExclusiveStartKey"] = key
+
+    items.sort(key=lambda i: i.get("updated_at") or i.get("triggered_at") or 0,
+               reverse=True)
+    return items[:limit]

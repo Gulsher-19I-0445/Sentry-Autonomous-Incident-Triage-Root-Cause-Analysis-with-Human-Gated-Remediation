@@ -1,318 +1,493 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sentry — incident triage</title>
 <!--
-  Deliberately one file with no build step and no framework, matching the
-  project's stdlib-only stance. It talks to the approval gate's Function URL
-  and holds the token in sessionStorage: the token is a shared secret, not an
-  identity, so it lives no longer than the tab.
+  One file, no build step, no framework — matching the project's stdlib-only
+  stance, and because this is opened straight from disk.
+
+  The board is organised by what an operator has to DO, not by the status enum.
+  Ten statuses collapse into four columns, each answering one question:
+  is anything happening, must I decide something, is anything broken that
+  nobody is handling, and what happened recently.
 -->
 <style>
   :root {
-    --bg: #fbfaf8; --panel: #fff; --line: #e4e0d8; --ink: #23201c;
-    --muted: #6b655c; --accent: #8a5a2b; --ok: #2f6b4f; --warn: #9a6a1b;
-    --bad: #a33a2a;
+    --bg:#faf9f7; --panel:#fff; --line:#e3dfd7; --ink:#211e1a; --muted:#6f6961;
+    --accent:#8a5a2b; --ok:#2f6b4f; --warn:#9a6a1b; --bad:#a33a2a;
+    --shadow:0 1px 2px rgba(0,0,0,.05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #171614; --panel: #201e1b; --line: #35322d; --ink: #eae6df;
-      --muted: #9b948a; --accent: #d79b62; --ok: #6fbf95; --warn: #d8ab5a;
-      --bad: #e0806e;
+      --bg:#15140f; --panel:#1e1c18; --line:#332f29; --ink:#ebe7e0; --muted:#9c958b;
+      --accent:#d79b62; --ok:#6fbf95; --warn:#d8ab5a; --bad:#e0806e;
+      --shadow:0 1px 2px rgba(0,0,0,.3);
     }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing:border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    margin:0; background:var(--bg); color:var(--ink);
+    font:14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
   }
+  button, input { font:inherit; }
+
+  /* ---- header ------------------------------------------------------ */
   header {
-    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
-    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
-    position: sticky; top: 0; z-index: 5;
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:12px 18px; border-bottom:1px solid var(--line); background:var(--panel);
   }
-  h1 { font-size: 16px; margin: 0 auto 0 0; letter-spacing: .2px; }
-  h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-  input, select, button {
-    font: inherit; padding: 6px 10px; border: 1px solid var(--line);
-    border-radius: 6px; background: var(--bg); color: var(--ink);
+  h1 { font-size:15px; margin:0; letter-spacing:.2px; font-weight:650; }
+  h1 span { color:var(--muted); font-weight:400; }
+  .verdict { font-size:13.5px; color:var(--muted); margin-right:auto; }
+  .verdict b { color:var(--ink); }
+  .verdict.alert b { color:var(--accent); }
+  .chip {
+    border:1px solid var(--line); background:var(--bg); color:var(--muted);
+    border-radius:999px; padding:4px 11px; font-size:12.5px; cursor:pointer;
   }
-  button { cursor: pointer; }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  .primary { background: var(--ok); border-color: var(--ok); color: #fff; }
-  .danger  { background: var(--bad); border-color: var(--bad); color: #fff; }
-  main { padding: 18px 20px; max-width: 1100px; margin: 0 auto; }
-  .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-  .pill {
-    border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px;
-    font-size: 12.5px; color: var(--muted); background: var(--panel);
+  .chip:hover { border-color:var(--accent); }
+  .toggle { display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--muted); }
+  #setup {
+    display:none; gap:8px; width:100%; padding-top:10px; flex-wrap:wrap;
+    border-top:1px dashed var(--line); margin-top:2px;
   }
+  #setup.open { display:flex; }
+  #setup input {
+    padding:6px 10px; border:1px solid var(--line); border-radius:6px;
+    background:var(--bg); color:var(--ink); flex:1 1 260px;
+  }
+
+  /* ---- board ------------------------------------------------------- */
+  .board {
+    display:grid; grid-template-columns:repeat(4, minmax(0,1fr));
+    gap:14px; padding:16px 18px; align-items:start;
+  }
+  /* Four columns are unusable below this width; stack them in the same
+     priority order rather than letting each become a sliver. */
+  @media (max-width: 1000px) { .board { grid-template-columns:1fr; } }
+
+  .col { min-width:0; }
+  .col > h2 {
+    display:flex; align-items:center; gap:7px; margin:0 0 9px;
+    font-size:11.5px; font-weight:650; letter-spacing:.7px; text-transform:uppercase;
+    color:var(--muted);
+  }
+  .col > h2 .n {
+    background:var(--line); color:var(--ink); border-radius:999px;
+    padding:1px 7px; font-size:11px; letter-spacing:0;
+  }
+  .col-act > h2, .col-act > h2 .n { color:var(--accent); }
+  .col-act > h2 .n { background:color-mix(in srgb, var(--accent) 18%, transparent); }
+  .col-esc > h2 { color:var(--bad); }
+
   .card {
-    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
-    padding: 14px 16px; margin-bottom: 12px;
+    background:var(--panel); border:1px solid var(--line); border-left:2px solid var(--line);
+    border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer;
+    box-shadow:var(--shadow);
   }
-  .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .id { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted); }
-  .status {
-    font-size: 11.5px; font-weight: 600; letter-spacing: .4px;
-    padding: 2px 8px; border-radius: 4px; border: 1px solid currentColor;
+  .card:hover { border-color:var(--accent); }
+  .card.sel { border-color:var(--accent); border-left-color:var(--accent); }
+  .col-act .card { border-left-color:var(--accent); }
+  .col-esc .card { border-left-color:var(--bad); }
+  .card .who {
+    font-size:12px; color:var(--muted); display:flex; gap:6px;
+    align-items:baseline; justify-content:space-between;
   }
-  .s-PENDING_APPROVAL { color: var(--warn); }
-  .s-EXECUTED, .s-APPROVED, .s-CLOSED { color: var(--ok); }
-  .s-FAILED, .s-REJECTED { color: var(--bad); }
-  .s-ESCALATED, .s-INFORMATIONAL, .s-INVESTIGATING, .s-NEW { color: var(--muted); }
-  .summary { margin: 8px 0; }
-  .meta { color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; }
-  .meta b { color: var(--ink); font-weight: 600; }
-  details { margin-top: 10px; }
-  summary { cursor: pointer; color: var(--accent); font-size: 13.5px; }
-  ul.evidence { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
-  ul.evidence li { margin-bottom: 4px; }
-  .actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+  .card .what { margin:3px 0 0; font-size:13.5px; line-height:1.4; }
+  .card .act {
+    margin-top:6px; font-size:12.5px; color:var(--accent);
+    display:flex; justify-content:space-between; gap:8px; align-items:baseline;
+  }
+  .card .act .conf { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .btns { display:flex; gap:6px; margin-top:9px; }
+  .btns button {
+    flex:1; padding:5px 0; border-radius:6px; border:1px solid var(--line);
+    background:var(--bg); color:var(--ink); cursor:pointer; font-size:12.5px;
+  }
+  .btns .yes:hover { background:var(--ok); border-color:var(--ok); color:#fff; }
+  .btns .no:hover  { background:var(--bad); border-color:var(--bad); color:#fff; }
+  .btns button:disabled { opacity:.4; cursor:not-allowed; }
+
+  .working { display:inline-block; width:6px; height:6px; border-radius:50%;
+             background:var(--warn); animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.2} 50%{opacity:1} }
+  @media (prefers-reduced-motion: reduce) { .working { animation:none; opacity:.85 } }
+  .card.stuck { border-color:var(--bad); border-left-color:var(--bad); }
+  .card.stuck .who { color:var(--bad); }
+
+  .none { color:var(--muted); font-size:12.5px; padding:10px 2px; font-style:italic; }
+
+  /* ---- detail panel ------------------------------------------------ */
+  #panel {
+    position:fixed; top:0; right:0; bottom:0; width:min(460px, 100%);
+    background:var(--panel); border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .16s ease-out;
+    overflow-y:auto; padding:18px 20px 40px; z-index:20;
+    box-shadow:-4px 0 20px rgba(0,0,0,.08);
+  }
+  #panel.open { transform:none; }
+  @media (prefers-reduced-motion: reduce) { #panel { transition:none } }
+  #panel h3 { margin:0 0 2px; font-size:14.5px; }
+  #panel .id { font-family:ui-monospace, monospace; font-size:12px; color:var(--muted); }
+  #panel .close { position:absolute; top:14px; right:16px; }
+  #panel section { margin-top:18px; }
+  #panel section > h4 {
+    margin:0 0 6px; font-size:11px; letter-spacing:.7px; text-transform:uppercase;
+    color:var(--muted); font-weight:650;
+  }
+  #panel ul { margin:0; padding-left:18px; }
+  #panel li { margin-bottom:5px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:13px; }
+  .kv dt { color:var(--muted); }
+  .kv dd { margin:0; }
+  .trace { display:flex; flex-wrap:wrap; gap:5px; }
+  .trace span {
+    background:var(--bg); border:1px solid var(--line); border-radius:5px;
+    padding:2px 8px; font-size:12px; font-family:ui-monospace, monospace;
+  }
   .note {
-    font-size: 13px; color: var(--muted); border-left: 2px solid var(--line);
-    padding-left: 10px; margin-top: 10px;
+    font-size:12.5px; color:var(--muted); border-left:2px solid var(--line);
+    padding-left:10px; margin-top:8px;
   }
-  .empty, .error { color: var(--muted); padding: 30px 0; text-align: center; }
-  .error { color: var(--bad); }
-  code { font-family: ui-monospace, monospace; font-size: 12.5px; }
-  .live { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
-  .working { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-             background: var(--warn); margin-right: 6px;
-             animation: pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
-  @media (prefers-reduced-motion: reduce) { .working { animation: none; opacity: .8 } }
-  .stuck { border-color: var(--bad); }
-  .stuck-note { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .note.bad { color:var(--bad); border-color:var(--bad); }
+  code { font-family:ui-monospace, monospace; font-size:12px; word-break:break-all; }
+  .msg { font-size:12.5px; color:var(--muted); margin-top:8px; }
+  .err { color:var(--bad); padding:20px; }
+  #scrim {
+    position:fixed; inset:0; background:rgba(0,0,0,.25); z-index:19; display:none;
+  }
+  #scrim.open { display:block; }
 </style>
 
 <header>
-  <h1>Sentry <small>incident triage</small></h1>
-  <input id="url" placeholder="approval gate URL" size="34">
-  <input id="token" placeholder="approval token" type="password" size="18">
-  <select id="filter">
-    <option value="PENDING_APPROVAL">Awaiting approval</option>
-    <option value="NEW,INVESTIGATING">In progress</option>
-    <option value="all">All incidents</option>
-    <option value="ESCALATED">Escalated</option>
-    <option value="INFORMATIONAL">Informational</option>
-    <option value="EXECUTED,APPROVED,CLOSED">Actioned</option>
-    <option value="FAILED,REJECTED">Failed / rejected</option>
-  </select>
-  <label class="live"><input type="checkbox" id="auto"> auto</label>
-  <button id="refresh">Refresh</button>
+  <h1>Sentry <span>· incident triage</span></h1>
+  <div class="verdict" id="verdict">Not connected</div>
+  <label class="toggle"><input type="checkbox" id="auto"> auto-refresh</label>
+  <button class="chip" id="cfg">connection</button>
+  <button class="chip" id="refresh">Refresh</button>
+  <div id="setup">
+    <input id="url" placeholder="approval gate URL">
+    <input id="token" placeholder="approval token" type="password">
+  </div>
 </header>
 
-<main>
-  <div class="counts" id="counts"></div>
-  <div id="list"><p class="empty">Enter the gate URL and token, then refresh.</p></div>
-</main>
+<div class="board" id="board"></div>
+
+<div id="scrim"></div>
+<aside id="panel" aria-live="polite"></aside>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const store = window.sessionStorage;
+const store = sessionStorage;
 
-// Restore between refreshes, but never persist the token beyond the tab.
-$("url").value = store.getItem("gate_url") || "";
-$("token").value = store.getItem("gate_token") || "";
+// Ten statuses, four questions. The enum is an implementation detail; what an
+// operator wants to know is whether they have to do something.
+const COLUMNS = [
+  { key:"working",  title:"Working",   statuses:["NEW","INVESTIGATING","APPROVED"],
+    empty:"Nothing running." },
+  { key:"needs",    title:"Needs you", statuses:["PENDING_APPROVAL"],
+    empty:"Nothing awaiting your decision.", cls:"col-act" },
+  { key:"escalated",title:"Escalated", statuses:["ESCALATED","FAILED"],
+    empty:"Nothing needs investigation.", cls:"col-esc" },
+  { key:"handled",  title:"Handled",   statuses:["EXECUTED","CLOSED","REJECTED","INFORMATIONAL"],
+    empty:"No history yet.", cap:12 },
+];
+const IN_FLIGHT = new Set(["NEW","INVESTIGATING","APPROVED"]);
+
+// A crashed investigation stays INVESTIGATING forever — the status guard treats
+// it as already in progress, so nothing retries it and nothing moves it. The
+// observed mean is ~75s and the agent's own timeout is 300s.
+const STUCK_AFTER_S = 360;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
-  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
+const ago = (ts) => {
+  if (!ts) return "";
+  const s = Math.max(0, Math.floor(Date.now()/1000 - Number(ts)));
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s/60) + "m";
+  if (s < 86400) return Math.floor(s/3600) + "h";
+  return Math.floor(s/86400) + "d";
+};
+
+const shortComponent = (i) =>
+  (i.affected_component || i.alarm_name || i.incident_id || "")
+    .replace(/^sentry-capstone-/, "").replace(/-gulsher$/, "").replace(/-errors$/, "");
+
+let state = { incidents: [], selected: null, timer: null };
+
+// ---- api -------------------------------------------------------------
 async function call(path, options = {}) {
   const base = $("url").value.trim().replace(/\/$/, "");
   const token = $("token").value.trim();
-  if (!base || !token) throw new Error("Set the gate URL and token first.");
+  if (!base || !token) throw new Error("Set the gate URL and token.");
   store.setItem("gate_url", base);
   store.setItem("gate_token", token);
 
   const res = await fetch(base + path, {
     ...options,
-    headers: {
-      "content-type": "application/json",
-      "x-approval-token": token,
-      "x-actor": "dashboard",
-      ...(options.headers || {}),
-    },
+    headers: { "content-type":"application/json", "x-approval-token":token,
+               "x-actor":"dashboard", ...(options.headers || {}) },
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
   return body;
 }
 
-function confidenceNote(c) {
-  if (c == null) return "";
-  const n = Number(c);
-  // Surfaced because a confident wrong answer is the dangerous quadrant, and
-  // the operator is the check on it.
-  if (n < 0.5) return " — low confidence, treat as a hint";
-  if (n >= 0.85) return " — high confidence, still verify the evidence";
-  return "";
-}
-
-const IN_PROGRESS = new Set(["NEW", "INVESTIGATING"]);
-// A crashed investigation leaves the incident in INVESTIGATING forever: the
-// status guard means it is never retried, so nothing ever moves it. Past this
-// many seconds it is almost certainly dead rather than slow — the observed mean
-// is ~75s and the agent's own timeout is 300s.
-const STUCK_AFTER_S = 360;
-
-const ago = (ts) => {
-  if (!ts) return null;
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - Number(ts)));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-};
-
-function progressCard(i) {
-  const elapsed = Math.floor(Date.now() / 1000 - Number(i.updated_at || i.triggered_at || 0));
+// ---- board -----------------------------------------------------------
+function cardHtml(i) {
+  const inFlight = IN_FLIGHT.has(i.status);
+  const pending = i.status === "PENDING_APPROVAL";
+  const elapsed = Math.floor(Date.now()/1000 - Number(i.updated_at || i.triggered_at || 0));
   const stuck = i.status === "INVESTIGATING" && elapsed > STUCK_AFTER_S;
 
-  return `<article class="card${stuck ? " stuck" : ""}">
-    <div class="row">
-      <span class="status s-${esc(i.status)}">
-        ${stuck ? "" : '<span class="working"></span>'}${esc(i.status)}
-      </span>
-      <span class="id">${esc(i.incident_id)}</span>
-      <span class="id">${esc(i.alarm_name || "")}</span>
-    </div>
-    <p class="summary">${esc(i.state_reason || "Alarm fired; no analysis yet.")}</p>
-    <div class="meta">
-      <span>${i.status === "NEW" ? "queued" : "running"} for <b>${esc(ago(i.updated_at))}</b></span>
-      ${i.suppressed_count ? `<span><b>${esc(i.suppressed_count)}</b> duplicate alarms absorbed</span>` : ""}
-    </div>
-    ${stuck ? `<div class="stuck-note">
-      Stuck — an investigation that crashed mid-run stays in INVESTIGATING and is
-      never retried, because the status guard treats it as already in progress.
-      Check the agent log for this incident id.
-    </div>` : ""}
-  </article>`;
-}
+  let what, action = "";
 
-function card(i) {
-  if (IN_PROGRESS.has(i.status)) return progressCard(i);
-
-  const pending = i.status === "PENDING_APPROVAL";
-  const conf = i.confidence == null ? "—" : Number(i.confidence).toFixed(2);
-
-  const evidence = (i.evidence || []).length
-    ? `<details><summary>Evidence (${i.evidence.length})</summary>
-         <ul class="evidence">${i.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
-       </details>` : "";
-
-  let outcome = "";
-  if (i.execution_result) {
-    const r = i.execution_result;
-    outcome = `<div class="note"><b>Executed:</b> ${esc(r.action)}
-      ${r.from_version ? `— version ${esc(r.from_version)} → ${esc(r.to_version)}` : ""}
-      ${r.undo ? `<br>Undo: <code>${esc(r.undo)}</code>` : ""}</div>`;
-  } else if (i.rejection_reason) {
-    outcome = `<div class="note"><b>Rejected</b> by ${esc(i.rejected_by)}: ${esc(i.rejection_reason)}</div>`;
-  } else if (i.escalation_reason) {
-    outcome = `<div class="note"><b>Escalated:</b> ${esc(i.escalation_reason)}</div>`;
-  } else if (i.failure_reason) {
-    outcome = `<div class="note"><b>Failed:</b> ${esc(i.failure_reason)}</div>`;
+  if (inFlight) {
+    what = i.status === "APPROVED" ? "Applying the approved remediation"
+         : i.status === "NEW" ? "Queued for investigation"
+         : "Investigating";
+    if (stuck) what = "Stopped responding mid-investigation";
+  } else {
+    what = i.summary || i.state_reason || "No analysis recorded.";
+    // One line only — the full reasoning lives in the panel, which has room.
+    if (what.length > 105) what = what.slice(0, 104) + "…";
   }
 
-  const actions = pending ? `
-    <div class="actions" data-id="${esc(i.incident_id)}">
-      <button class="primary approve">Approve ${esc(i.proposed_remediation)}</button>
-      <button class="danger reject">Reject</button>
-      <span class="msg"></span>
+  if (pending) {
+    const r = { alias_rollback:"Roll back the live alias",
+                feature_flag:"Disable a feature flag" }[i.proposed_remediation]
+              || i.proposed_remediation;
+    action = `<div class="act"><span>${esc(r)}</span>
+                <span class="conf">${i.confidence != null ? Number(i.confidence).toFixed(2) : "—"}</span></div>`;
+  } else if (i.execution_result) {
+    const r = i.execution_result;
+    action = `<div class="act"><span>${esc(r.action === "none" ? "No action needed" : r.action)}${
+      r.from_version ? ` · v${esc(r.from_version)} → v${esc(r.to_version)}` : ""}</span></div>`;
+  } else if (i.status === "INFORMATIONAL") {
+    action = `<div class="act"><span>No action needed</span>
+                <span class="conf">${i.confidence != null ? Number(i.confidence).toFixed(2) : "—"}</span></div>`;
+  } else if (i.status === "REJECTED") {
+    action = `<div class="act"><span>Rejected${i.rejected_by ? " by " + esc(i.rejected_by) : ""}</span></div>`;
+  } else if (i.status === "FAILED") {
+    action = `<div class="act"><span>Could not complete</span></div>`;
+  } else if (i.status === "ESCALATED") {
+    action = `<div class="act"><span>No safe automated fix</span>
+                <span class="conf">${i.confidence != null ? Number(i.confidence).toFixed(2) : "—"}</span></div>`;
+  }
+
+  const buttons = pending ? `<div class="btns" data-id="${esc(i.incident_id)}">
+      <button class="yes">Approve</button><button class="no">Reject</button>
     </div>` : "";
 
-  return `<article class="card">
-    <div class="row">
-      <span class="status s-${esc(i.status)}">${esc(i.status)}</span>
-      <span class="id">${esc(i.incident_id)}</span>
-      <span class="id">${esc(i.alarm_name || "")}</span>
+  return `<article class="card${stuck ? " stuck" : ""}${
+      state.selected === i.incident_id ? " sel" : ""}" data-id="${esc(i.incident_id)}">
+    <div class="who">
+      <span>${inFlight && !stuck ? '<span class="working"></span> ' : ""}${esc(shortComponent(i))}</span>
+      <span>${esc(ago(i.updated_at || i.triggered_at))}</span>
     </div>
-    <p class="summary">${esc(i.summary || "No summary.")}</p>
-    <div class="meta">
-      <span><b>${esc(i.root_cause || "—")}</b> cause</span>
-      <span>confidence <b>${conf}</b>${esc(confidenceNote(i.confidence))}</span>
-      <span>suspect <b>${esc(i.suspect_change || "none")}</b></span>
-      <span>component <b>${esc(i.affected_component || "—")}</b></span>
-      <span>${esc(i.tool_calls)} tool calls</span>
-      <span>$${esc(i.cost_usd || "0")}</span>
-      ${i.runbook_applied ? `<span>runbook <b>${esc(i.runbook_applied)}</b></span>` : ""}
-    </div>
-    ${i.remediation_detail ? `<div class="note">${esc(i.remediation_detail)}</div>` : ""}
-    ${evidence}${outcome}${actions}
+    <p class="what">${esc(what)}</p>
+    ${action}${buttons}
   </article>`;
 }
 
-let timer = null;
+function render() {
+  const by = {};
+  for (const col of COLUMNS) by[col.key] = [];
+  for (const i of state.incidents) {
+    const col = COLUMNS.find(c => c.statuses.includes(i.status));
+    if (col) by[col.key].push(i);      // unknown statuses are dropped, not hidden silently
+  }
+
+  $("board").innerHTML = COLUMNS.map(col => {
+    const items = col.cap ? by[col.key].slice(0, col.cap) : by[col.key];
+    const hidden = by[col.key].length - items.length;
+    return `<div class="col ${col.cls || ""}">
+      <h2>${esc(col.title)}<span class="n">${by[col.key].length}</span></h2>
+      ${items.length ? items.map(cardHtml).join("")
+                     : `<p class="none">${esc(col.empty)}</p>`}
+      ${hidden > 0 ? `<p class="none">+ ${hidden} older</p>` : ""}
+    </div>`;
+  }).join("");
+
+  // The header answers "is anything on fire?" without reading the board.
+  const needs = by.needs.length, esc_ = by.escalated.length, work = by.working.length;
+  const bits = [];
+  if (needs) bits.push(`<b>${needs} need${needs === 1 ? "s" : ""} your decision</b>`);
+  if (esc_) bits.push(`${esc_} escalated`);
+  if (work) bits.push(`${work} running`);
+  $("verdict").innerHTML = bits.length ? bits.join(" · ") : "Nothing outstanding";
+  $("verdict").className = "verdict" + (needs ? " alert" : "");
+}
 
 async function load(quiet = false) {
-  const list = $("list");
-  if (!quiet) {
-    list.innerHTML = `<p class="empty">Loading…</p>`;
-    $("counts").innerHTML = "";
-  }
+  if (!quiet) $("board").innerHTML = `<p class="none">Loading…</p>`;
   try {
-    const data = await call(`/incidents?status=${encodeURIComponent($("filter").value)}`);
-    $("counts").innerHTML = Object.entries(data.counts_by_status || {})
-      .map(([s, n]) => `<span class="pill">${esc(s)} · ${n}</span>`).join("");
-    list.innerHTML = data.incidents.length
-      ? data.incidents.map(card).join("")
-      : `<p class="empty">Nothing here.</p>`;
-    schedule(data.incidents.some((i) => IN_PROGRESS.has(i.status)));
+    const data = await call("/incidents?status=all");
+    state.incidents = data.incidents || [];
+    render();
+    schedule(state.incidents.some(i => IN_FLIGHT.has(i.status)));
   } catch (err) {
-    // Show the error but do not keep polling into it — a wrong token would
-    // otherwise retry forever.
-    list.innerHTML = `<p class="error">${esc(err.message)}</p>`;
-    schedule(false);
+    $("board").innerHTML = `<p class="err">${esc(err.message)}</p>`;
+    $("setup").classList.add("open");
+    schedule(false);      // do not poll into a bad token forever
   }
 }
 
-function schedule(anythingRunning) {
-  clearTimeout(timer);
+function schedule(busy) {
+  clearTimeout(state.timer);
   if (!$("auto").checked) return;
-  // Poll quickly while work is actually moving, slowly otherwise. An
-  // investigation takes ~75s, so 5s is responsive without being wasteful.
-  timer = setTimeout(() => load(true), anythingRunning ? 5000 : 20000);
+  // 5s while work is moving, 20s otherwise. An investigation takes ~75s.
+  state.timer = setTimeout(() => load(true), busy ? 5000 : 20000);
 }
 
+// ---- detail panel ----------------------------------------------------
+function closePanel() {
+  state.selected = null;
+  $("panel").classList.remove("open");
+  $("scrim").classList.remove("open");
+  render();
+}
+
+async function openPanel(id) {
+  const i = state.incidents.find(x => x.incident_id === id);
+  if (!i) return;
+  state.selected = id;
+  render();
+  $("panel").classList.add("open");
+  $("scrim").classList.add("open");
+
+  const conf = i.confidence == null ? "—" : Number(i.confidence).toFixed(2);
+  // Surfaced deliberately: the evaluation found the agent is occasionally more
+  // confident when wrong than when right, so the operator is the check on it.
+  const hint = i.confidence == null ? ""
+    : Number(i.confidence) < 0.5 ? " — low, treat as a hint"
+    : Number(i.confidence) >= 0.85 ? " — high, still check the evidence" : "";
+
+  const rows = [
+    ["Status", i.status],
+    ["Component", i.affected_component],
+    ["Root cause", i.root_cause],
+    ["Confidence", conf + hint],
+    ["Suspect change", i.suspect_change || "none implicated"],
+    ["Runbook", i.runbook_applied || "none matched"],
+    ["Cost", i.cost_usd ? "$" + i.cost_usd : null],
+  ].filter(([, v]) => v != null && v !== "");
+
+  let outcome = "";
+  if (i.execution_result?.undo) {
+    outcome = `<section><h4>Executed</h4>
+      <div class="note">${esc(i.execution_result.action)}${
+        i.execution_result.from_version
+          ? ` — v${esc(i.execution_result.from_version)} → v${esc(i.execution_result.to_version)}` : ""}
+      <br>Undo: <code>${esc(i.execution_result.undo)}</code></div></section>`;
+  }
+  for (const [label, value, bad] of [
+      ["Escalated", i.escalation_reason, false],
+      ["Failed", i.failure_reason, true],
+      ["Rejected", i.rejection_reason, false]]) {
+    if (value) outcome += `<section><h4>${label}</h4>
+      <div class="note${bad ? " bad" : ""}">${esc(value)}</div></section>`;
+  }
+
+  $("panel").innerHTML = `
+    <button class="chip close" id="x">close</button>
+    <h3>${esc(shortComponent(i))}</h3>
+    <div class="id">${esc(i.incident_id)}</div>
+    <section><h4>Summary</h4>
+      <div>${esc(i.summary || i.state_reason || "No analysis recorded.")}</div></section>
+    <section><h4>Assessment</h4>
+      <dl class="kv">${rows.map(([k, v]) =>
+        `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl></section>
+    ${(i.evidence || []).length ? `<section><h4>Evidence</h4>
+      <ul>${i.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
+    ${i.remediation_detail ? `<section><h4>Proposed</h4>
+      <div class="note">${esc(i.remediation_detail)}</div></section>` : ""}
+    ${outcome}
+    <section id="trace"><h4>Investigation</h4>
+      <p class="none">loading…</p></section>
+    ${i.status === "PENDING_APPROVAL" ? `<section>
+      <div class="btns" data-id="${esc(i.incident_id)}">
+        <button class="yes">Approve</button><button class="no">Reject</button>
+      </div><div class="msg"></div></section>` : ""}`;
+
+  $("x").onclick = closePanel;
+
+  // The tool sequence lives on the full record, not the list summary. It is
+  // the clearest evidence of how the conclusion was reached, so it is worth a
+  // second request.
+  try {
+    const full = await call("/incidents/" + encodeURIComponent(id));
+    const steps = full.trace?.steps || [];
+    $("trace").innerHTML = `<h4>Investigation</h4>` + (steps.length
+      ? `<div class="trace">${steps.map(s =>
+           `<span>${esc(s.tool)}</span>`).join("")}</div>
+         <p class="msg">${steps.length} tool calls${
+           full.trace?.duration_ms ? " · " + Math.round(full.trace.duration_ms/1000) + "s" : ""}</p>`
+      : `<p class="none">No tool calls recorded.</p>`);
+  } catch {
+    $("trace").innerHTML = `<h4>Investigation</h4><p class="none">Trace unavailable.</p>`;
+  }
+}
+
+// ---- actions ---------------------------------------------------------
 async function act(box, verb) {
   const id = box.dataset.id;
-  const msg = box.querySelector(".msg");
   let reason = null;
   if (verb === "reject") {
     reason = prompt("Why is this being rejected? (recorded on the incident)");
     if (reason === null) return;
   }
-  box.querySelectorAll("button").forEach((b) => (b.disabled = true));
-  msg.textContent = "Working…";
+  box.querySelectorAll("button").forEach(b => b.disabled = true);
+  const msg = box.parentElement.querySelector(".msg");
+  if (msg) msg.textContent = "Working…";
+
   try {
     await call(`/incidents/${encodeURIComponent(id)}/${verb}`, {
-      method: "POST",
-      body: JSON.stringify({ actor: "dashboard", reason }),
+      method:"POST", body: JSON.stringify({ actor:"dashboard", reason }),
     });
-    msg.textContent = verb === "approve" ? "Approved — executor invoked." : "Rejected.";
-    // The executor runs asynchronously, so give it a moment before re-reading.
-    setTimeout(load, 1500);
+    if (msg) msg.textContent = verb === "approve" ? "Approved — executor invoked." : "Rejected.";
+    closePanel();
+    setTimeout(() => load(true), 1200);   // the executor runs asynchronously
   } catch (err) {
-    msg.textContent = err.message;
-    box.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    if (msg) msg.textContent = err.message;
+    box.querySelectorAll("button").forEach(b => b.disabled = false);
   }
 }
 
-$("list").addEventListener("click", (e) => {
-  const box = e.target.closest(".actions");
-  if (!box) return;
-  if (e.target.classList.contains("approve")) act(box, "approve");
-  if (e.target.classList.contains("reject")) act(box, "reject");
-});
+function wire(root) {
+  root.addEventListener("click", (e) => {
+    const btns = e.target.closest(".btns");
+    if (btns) {
+      e.stopPropagation();
+      if (e.target.classList.contains("yes")) act(btns, "approve");
+      if (e.target.classList.contains("no")) act(btns, "reject");
+      return;
+    }
+    const card = e.target.closest(".card");
+    if (card) openPanel(card.dataset.id);
+  });
+}
+wire($("board"));
+wire($("panel"));
 
-$("refresh").addEventListener("click", () => load());
-$("filter").addEventListener("change", () => load());
-$("auto").addEventListener("change", () => {
+$("scrim").onclick = closePanel;
+document.addEventListener("keydown", e => { if (e.key === "Escape") closePanel(); });
+$("refresh").onclick = () => load();
+$("cfg").onclick = () => $("setup").classList.toggle("open");
+$("auto").onchange = () => {
   store.setItem("gate_auto", $("auto").checked ? "1" : "");
-  $("auto").checked ? load(true) : clearTimeout(timer);
-});
+  $("auto").checked ? load(true) : clearTimeout(state.timer);
+};
 
+// Restore between reloads. The token is a shared secret, not an identity, so
+// it lives no longer than the tab.
+$("url").value = store.getItem("gate_url") || "";
+$("token").value = store.getItem("gate_token") || "";
 $("auto").checked = store.getItem("gate_auto") === "1";
+
 if ($("url").value && $("token").value) load();
+else { $("setup").classList.add("open"); $("board").innerHTML =
+  `<p class="none">Enter the gate URL and token above.</p>`; }
 </script>

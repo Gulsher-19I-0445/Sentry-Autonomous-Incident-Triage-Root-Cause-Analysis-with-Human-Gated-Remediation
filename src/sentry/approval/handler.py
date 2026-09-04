@@ -26,6 +26,7 @@ from ..common.incidents import (
     IllegalTransition,
     Status,
     get_incident,
+    list_all,
     list_by_status,
     transition,
 )
@@ -173,13 +174,16 @@ def _reject(incident_id: str, actor: str, reason: str | None) -> dict:
 def _dashboard_view(status_filter: str) -> dict:
     """Incidents for the dashboard, newest first.
 
-    `all` walks every status rather than scanning once, because the incidents
-    table has no status index — at capstone volume a handful of filtered scans
-    is cheaper than adding a GSI, and the cost of getting that wrong is a
-    slower page rather than a wrong answer.
+    Two paths on purpose. `all` — what the board always asks for — is one
+    unfiltered scan grouped in code; a scan per status meant ten per refresh,
+    about 120 a minute with auto-refresh on. It also paginates, so a table
+    larger than the scan limit does not silently drop incidents.
+
+    An explicit status list still uses the filtered scan, which is cheaper when
+    only one status is wanted.
     """
     if status_filter.lower() == "all":
-        statuses = list(Status)
+        incidents = list_all()
     else:
         wanted = {s.strip().upper() for s in status_filter.split(",") if s.strip()}
         statuses = [s for s in Status if s.value in wanted]
@@ -187,9 +191,9 @@ def _dashboard_view(status_filter: str) -> dict:
             return {"error": f"unknown status {status_filter!r}",
                     "valid": [s.value for s in Status]}
 
-    incidents: list[dict] = []
-    for status in statuses:
-        incidents.extend(list_by_status(status))
+        incidents = []
+        for status in statuses:
+            incidents.extend(list_by_status(status))
 
     incidents.sort(key=lambda i: i.get("triggered_at") or 0, reverse=True)
 

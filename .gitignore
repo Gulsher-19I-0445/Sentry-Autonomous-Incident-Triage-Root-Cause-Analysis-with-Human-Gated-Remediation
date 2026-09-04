@@ -85,3 +85,7 @@ desktop.ini
 # nothing account-specific belongs in a published repo.
 trust.json
 *-policy.json
+
+# Generated from index.html with a data fixture, for looking at the layout
+# without a deployed gate. Not a source file.
+frontend/preview.html

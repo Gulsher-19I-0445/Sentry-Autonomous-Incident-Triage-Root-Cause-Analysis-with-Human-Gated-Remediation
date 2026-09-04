@@ -141,18 +141,22 @@ def test_default_listing_is_the_approval_queue(monkeypatch, pending):
     assert asked == ["PENDING_APPROVAL"]
 
 
-def test_status_all_walks_every_status(monkeypatch, pending):
-    from sentry.common.incidents import Status
-
-    asked = []
+def test_status_all_uses_a_single_scan(monkeypatch, pending):
+    """The board always wants every status. A filtered scan per status meant
+    ten per refresh — about 120 a minute with auto-refresh on — so `all` takes
+    one unfiltered scan and groups in code."""
+    per_status = []
     monkeypatch.setattr(gate, "list_by_status",
-                        lambda s, **k: asked.append(s.value) or [])
+                        lambda s, **k: per_status.append(s.value) or [])
+    monkeypatch.setattr(gate, "list_all", lambda **k: [pending])
 
     event = request(path="/incidents")
     event["queryStringParameters"] = {"status": "all"}
-    gate.handler(event, None)
+    response = gate.handler(event, None)
 
-    assert asked == [s.value for s in Status]
+    assert response["statusCode"] == 200
+    assert per_status == [], "all should not fall back to per-status scans"
+    assert body_of(response)["count"] == 1
 
 
 def test_a_comma_list_of_statuses_is_supported(monkeypatch):
@@ -181,15 +185,30 @@ def test_an_unknown_status_is_rejected_with_the_valid_set(monkeypatch):
 
 def test_the_listing_reports_counts_per_status(monkeypatch, pending):
     executed = {**pending, "incident_id": "done", "status": "EXECUTED"}
-    monkeypatch.setattr(gate, "list_by_status",
-                        lambda s, **k: [pending] if s.value == "PENDING_APPROVAL"
-                        else ([executed] if s.value == "EXECUTED" else []))
+    monkeypatch.setattr(gate, "list_all", lambda **k: [pending, executed])
 
     event = request(path="/incidents")
     event["queryStringParameters"] = {"status": "all"}
     counts = body_of(gate.handler(event, None))["counts_by_status"]
 
     assert counts == {"PENDING_APPROVAL": 1, "EXECUTED": 1}
+
+
+def test_every_status_lands_in_a_dashboard_column(monkeypatch, pending):
+    """The board groups ten statuses into four columns. Every status must land
+    in exactly one, or an incident silently disappears from the page."""
+    from sentry.common.incidents import Status
+
+    columns = {
+        "working":   {"NEW", "INVESTIGATING", "APPROVED"},
+        "needs_you": {"PENDING_APPROVAL"},
+        "escalated": {"ESCALATED", "FAILED"},
+        "handled":   {"EXECUTED", "CLOSED", "REJECTED", "INFORMATIONAL"},
+    }
+    assigned = [s for members in columns.values() for s in members]
+
+    assert sorted(assigned) == sorted(s.value for s in Status)
+    assert len(assigned) == len(set(assigned)), "a status is in two columns"
 
 
 def test_the_summary_carries_the_outcome_of_a_finished_incident(monkeypatch, pending):
