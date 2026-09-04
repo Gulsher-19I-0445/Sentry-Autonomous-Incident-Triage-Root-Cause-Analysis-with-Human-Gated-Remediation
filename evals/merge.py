@@ -34,18 +34,34 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("files", nargs="+", type=Path)
     parser.add_argument("-o", "--out", type=Path, default=Path("eval-merged.json"))
+    parser.add_argument(
+        "--supersede", action="store_true",
+        help="Later files replace earlier runs of the same scenario. Use when a "
+             "run was invalidated by a harness defect and re-run — averaging a "
+             "known-bad run with its replacement reports neither.")
     args = parser.parse_args()
 
     results: list[Result] = []
     for path in args.files:
         loaded = load(path)
         print(f"  {path.name}: {len(loaded)} runs")
+
+        if args.supersede:
+            replacing = {r.scenario_id for r in loaded}
+            before = len(results)
+            results = [r for r in results if r.scenario_id not in replacing]
+            dropped = before - len(results)
+            if dropped:
+                print(f"    superseding {dropped} earlier run(s) of "
+                      f"{', '.join(sorted(replacing))}")
+
         results.extend(loaded)
 
     seen = {(r.scenario_id, r.run_index) for r in results}
     if len(seen) != len(results):
         print("  WARNING: the same scenario and run index appears in more than "
-              "one file — merging them double-counts those runs")
+              "one file — merging them double-counts those runs. Pass "
+              "--supersede if the later file replaces the earlier one.")
 
     report = {
         "generated_at": None,
