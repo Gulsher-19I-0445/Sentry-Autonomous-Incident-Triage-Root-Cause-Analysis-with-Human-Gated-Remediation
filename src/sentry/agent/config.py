@@ -62,21 +62,21 @@ class Config:
     # target-app failure — it is the same feedback loop the log-group allow-list
     # prevents, arriving through CloudTrail instead. Filtering them out also
     # removes the deploy churn that a sweep generates about itself.
-    OWN_RESOURCES = [
-        r.strip() for r in os.environ.get(
-            "OWN_RESOURCES",
-            # Every Sentry component, including the ones added after this list
-            # was first written. A run surfaced the gap: the agent reported
-            # "IAM role-policy updates on approval/executor roles" as the only
-            # recent changes, having read the pipeline's own deployment as
-            # candidate evidence for a target-app failure.
-            "sentry-capstone-agent-gulsher,"
-            "sentry-capstone-ingest-gulsher,"
-            "sentry-capstone-executor-gulsher,"
-            "sentry-capstone-approval-gulsher,"
-            "sentry-capstone-work-gulsher,"
-            "sentry-capstone-incidents-gulsher",
-        ).split(",") if r.strip()
+    # COMPONENT names, not full resource names. Full names were matched as
+    # substrings, which silently failed the moment a resource did not follow
+    # the exact <project>-<component>-<owner> shape: the IAM role is
+    # "sentry-capstone-executor-role-gulsher", with "-role-" in the MIDDLE, so
+    # "sentry-capstone-executor-gulsher" is not a substring of it. The agent
+    # duly reported that role's policy change as a candidate cause for a
+    # target-app failure.
+    #
+    # Matching a hyphen-delimited token instead survives any arrangement:
+    # -role- suffixes, -dlq-, log group paths, ARNs.
+    OWN_COMPONENTS = [
+        c.strip() for c in os.environ.get(
+            "OWN_COMPONENTS",
+            "agent,ingest,executor,approval,work,incidents",
+        ).split(",") if c.strip()
     ]
 
     # --- storage -------------------------------------------------------------

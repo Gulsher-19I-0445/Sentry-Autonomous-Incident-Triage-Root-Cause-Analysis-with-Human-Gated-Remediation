@@ -11,6 +11,7 @@ api/handler.py" is evidence; "a commit happened 8 minutes earlier" is not.
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -98,8 +99,16 @@ TOOL_SPEC = {
 # --------------------------------------------------------------------------- #
 
 def _is_own_infrastructure(name: str) -> bool:
-    """Sentry's own components, which are never evidence about the target app."""
-    return any(own in name for own in Config.OWN_RESOURCES)
+    """Sentry's own components, which are never evidence about the target app.
+
+    Splits on non-alphanumerics and matches whole tokens, so it holds whatever
+    shape the resource name takes — `sentry-capstone-executor-role-gulsher`,
+    `/aws/lambda/sentry-capstone-agent-gulsher`, or a full ARN. Substring
+    matching on assembled names failed on the first of those, and the failure
+    was invisible: the filter simply passed the event through.
+    """
+    tokens = {t for t in re.split(r"[^a-z0-9]+", name.lower()) if t}
+    return any(component.lower() in tokens for component in Config.OWN_COMPONENTS)
 
 
 def _relevant(event: dict) -> bool:

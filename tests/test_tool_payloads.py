@@ -726,6 +726,40 @@ def test_relevant_rejects_a_raw_payload_for_another_workload():
     assert not changes._relevant(event)
 
 
+@pytest.mark.parametrize("name", [
+    # The literal name from the run that leaked. The filter matched full
+    # resource names as substrings, and "sentry-capstone-executor-gulsher" is
+    # NOT a substring of this — the role carries "-role-" in the MIDDLE. The
+    # agent duly offered this role's policy change as a candidate cause for a
+    # target-app failure, on a scenario whose whole point is that nothing is
+    # wrong.
+    "sentry-capstone-executor-role-gulsher",
+    "sentry-capstone-approval-role-gulsher",
+    # The shape Terraform produces, which differs again.
+    "sentry-capstone-executor-gulsher-role",
+    "sentry-capstone-approval-gulsher-role",
+    # And the shapes these resources take elsewhere.
+    "/aws/lambda/sentry-capstone-ingest-gulsher",
+    "arn:aws:sqs:us-east-1:000000000000:sentry-capstone-work-dlq-gulsher",
+])
+def test_own_infrastructure_is_excluded_whatever_the_name_shape(name):
+    """Match component tokens, not assembled names. Substring matching failed
+    silently — a name that did not fit the expected arrangement simply passed
+    through, and nothing in the output said the filter had not applied."""
+    assert not changes._relevant(cloudtrail_event([name])), name
+
+
+@pytest.mark.parametrize("name", [
+    "sentry-capstone-api-gulsher",
+    "sentry-capstone-consumer-gulsher",
+    "sentry-capstone-app-gulsher",
+    "sentry-capstone-orders-dlq-gulsher",
+])
+def test_target_app_resources_survive_the_token_filter(name):
+    """The filter must not over-reach: these are what the agent investigates."""
+    assert changes._relevant(cloudtrail_event([name])), name
+
+
 def test_relevant_rejects_sentrys_own_deploys():
     """Sentry's components share the name prefix but are downstream of the
     target app, so they cannot cause its failures. During a sweep they are also
@@ -793,7 +827,11 @@ def test_relevant_filters_a_realistic_mixed_batch():
     events = [
         cloudtrail_event(["sentry-capstone-api-gulsher"]),
         cloudtrail_event(["colleague-glue-job"]),
-        cloudtrail_event([], raw={"requestParameters": {"roleName": "sentry-capstone-agent-role-gulsher"}}),
+        # A target-app role named only in the payload. This used to be the
+        # AGENT's role, which was correct when any sentry-capstone-* resource
+        # counted as evidence — the own-infrastructure filter now drops that,
+        # so the fixture has to name something the agent actually investigates.
+        cloudtrail_event([], raw={"requestParameters": {"roleName": "sentry-capstone-consumer-role-gulsher"}}),
         cloudtrail_event([], raw={"requestParameters": {"roleName": "AmplifyDeployRole"}}),
         cloudtrail_event(["sentry-capstone-consumer-gulsher"]),
     ]
