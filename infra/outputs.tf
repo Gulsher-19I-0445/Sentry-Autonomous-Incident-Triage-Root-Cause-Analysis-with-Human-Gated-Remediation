@@ -36,17 +36,6 @@ output "investigation_targets" {
   }
 }
 
-output "target_api_url" {
-  description = "Demo application endpoint, when the bundled app is deployed."
-  value       = var.create_target_app ? aws_lambda_function_url.target_api[0].function_url : null
-}
-
-output "target_admin_token" {
-  description = "Arms a failure mode on the demo app. terraform output -raw target_admin_token"
-  value       = var.create_target_app ? random_password.admin_token[0].result : null
-  sensitive   = true
-}
-
 output "github_secret_name" {
   description = "Populate this out of band; Terraform never holds the token. Null when GitHub is disabled."
   value       = local.github_enabled ? aws_secretsmanager_secret.github[0].name : null
@@ -58,21 +47,22 @@ output "next_steps" {
 
     1. Point the dashboard at this deployment:
          cp frontend/config.example.json frontend/config.json
-       then fill in both URLs, which are not secret:
+       Fill in approval_url, which is not secret:
          terraform output -raw approval_url
-         terraform output -raw target_api_url
-
-       Open frontend/index.html and paste the two tokens, which are:
+       Then open frontend/index.html and paste the token:
          terraform output -raw approval_token
-         terraform output -raw target_admin_token
-       Deploy config.json alongside the page and anyone you share it with only
-       has to paste those two. Use "How to run" in the page to drive it.
+
+       The application being watched is deployed separately, so its URL and
+       admin token are not Terraform outputs. Add them to config.json and the
+       page to drive it from "How to run"; leave them out and the dashboard
+       still works, without the run controls.
 
     ${local.github_enabled ? "2. Populate the GitHub secret (Terraform never sees it):\n         aws secretsmanager put-secret-value --secret-id ${local.name["github"]} --secret-string '{\"token\":\"github_pat_...\"}'\n" : "2. GitHub is disabled. Set github_repo to let the agent read commits as evidence.\n"}
     3. Bedrock model access must be granted for ${var.agent_model_id}
        in ${local.region}. It is not requestable through Terraform.
 
-    ${var.create_target_app ? "4. Drive traffic at target_api_url to produce something to investigate." : "4. Alarms exist only for Lambda targets; define your own for anything else."}
+    4. Alarms are created for Lambda targets. For anything else, define your
+       own and point them at the alarms topic.
 
   EOT
 }

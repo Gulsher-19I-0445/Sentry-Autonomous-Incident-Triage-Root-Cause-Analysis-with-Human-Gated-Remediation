@@ -40,6 +40,9 @@ evals/fixtures/*.local.json
 out.json
 out-*.json
 body.json
+# CLI payloads written by the function-url / config commands in cli-reference
+cors.json
+env.json
 trace.json
 resp.json
 fnresp.json

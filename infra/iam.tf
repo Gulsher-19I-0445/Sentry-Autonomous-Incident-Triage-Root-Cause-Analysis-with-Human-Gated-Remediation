@@ -173,12 +173,17 @@ data "aws_iam_policy_document" "executor" {
     }
   }
 
+  # Only granted when a flag table is named. The executor may turn a flag off
+  # and never on: off is the recoverable direction, on is a change whose blast
+  # radius nobody has reasoned about.
   dynamic "statement" {
-    for_each = var.create_target_app ? [1] : []
+    for_each = var.app_flag_table != "" ? [1] : []
     content {
-      sid       = "DisableFeatureFlag"
-      actions   = ["dynamodb:UpdateItem", "dynamodb:Scan"]
-      resources = [aws_dynamodb_table.app[0].arn]
+      sid     = "DisableFeatureFlag"
+      actions = ["dynamodb:UpdateItem", "dynamodb:Scan"]
+      resources = [
+        "arn:${local.partition}:dynamodb:${local.region}:${local.account_id}:table/${var.app_flag_table}"
+      ]
     }
   }
 

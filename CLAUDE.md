@@ -12,16 +12,12 @@ evaluation is built around exactly that.
 
 ## Repository layout
 
+**The application under test lives in a separate repository**
+(`Gulsher-19I-0445/Test-app-for-sentry`) and is deployed by hand. Nothing
+here imports it; see "Why two repositories" below.
+
 ```
 src/
-├── target_app/              app.zip — the app that breaks on purpose
-│   ├── api/handler.py       orders API + admin chaos endpoints
-│   ├── consumer/handler.py  SQS consumer
-│   └── common/
-│       ├── _internal.py     fault injection (NEVER name this "chaos" — see below)
-│       ├── logging.py       structured JSON + correlation ids
-│       └── store.py         DynamoDB: orders + feature flags
-│
 └── sentry/                  sentry.zip — the triage pipeline
     ├── ingest/handler.py    SNS alarm -> dedup -> work queue
     ├── approval/handler.py  the gate: list, inspect, approve, reject
@@ -44,20 +40,23 @@ src/
 evals/
 ├── scenarios.py             ground truth
 ├── harness.py               integration harness (real AWS, real model)
-└── scoring.py               four-axis scoring
-docs/
-├── cli-reference.md         every working command + a gotchas table
-├── manual-setup.md          console setup for the target app
-└── sen-*-setup.md           per-ticket setup notes
+├── scoring.py               four-axis scoring
+└── target_app_contract.py   mirror of the other repo's failure modes
+frontend/
+├── index.html               operator dashboard + the "how to run" panel
+└── preview.html             generated from index.html, every endpoint faked
+cli-reference.md             every working command + a gotchas table (gitignored)
 ```
 
-Two separate deployment bundles. Same zip goes to every Lambda in its group;
-only the handler string differs.
+One deployment bundle here. The same zip goes to every Lambda; only the
+handler string differs.
 
 ```powershell
-cd src; Compress-Archive -Path target_app -DestinationPath ..\app.zip -Force; cd ..
-cd src; Compress-Archive -Path sentry     -DestinationPath ..\sentry.zip -Force; cd ..
+cd src; Compress-Archive -Path sentry -DestinationPath ..\sentry.zip -Force; cd ..
 ```
+
+The application's bundle is built in its own repository, with the same
+command and `target_app` in place of `sentry`.
 
 ---
 
@@ -65,8 +64,8 @@ cd src; Compress-Archive -Path sentry     -DestinationPath ..\sentry.zip -Force;
 
 | Resource | Name | Handler |
 |---|---|---|
-| API Lambda | `sentry-capstone-api-gulsher` | `target_app.api.handler.handler` |
-| Consumer Lambda | `sentry-capstone-consumer-gulsher` | `target_app.consumer.handler.handler` |
+| API Lambda* | `sentry-capstone-api-gulsher` | `target_app.api.handler.handler` |
+| Consumer Lambda* | `sentry-capstone-consumer-gulsher` | `target_app.consumer.handler.handler` |
 | Ingest Lambda | `sentry-capstone-ingest-gulsher` | `sentry.ingest.handler.handler` |
 | Agent Lambda | `sentry-capstone-agent-gulsher` | `sentry.agent.handler.handler` |
 | App table | `sentry-capstone-app-gulsher` | orders + flags |
@@ -74,6 +73,10 @@ cd src; Compress-Archive -Path sentry     -DestinationPath ..\sentry.zip -Force;
 | Orders queue | `sentry-capstone-orders-gulsher` (+ `-dlq-`) | |
 | Work queue | `sentry-capstone-work-gulsher` (+ `-dlq-`) | |
 | Alarms | `sentry-capstone-{api-errors,consumer-errors,api-latency,dlq-depth}-gulsher` | |
+
+\* Deployed from the application's own repository, by hand. They are listed
+here because Sentry watches them and the executor may roll their alias back,
+not because this repository builds them.
 
 Naming convention: `sentry-capstone-<component>-gulsher`. This is a **shared
 account** with other engineers' workloads — never create anything without that
@@ -112,7 +115,26 @@ specifically so stack traces look ordinary. An earlier version was called
 `chaos.py`, the agent read it in a stack trace, and correctly reported "a
 fault-injection harness appears to be enabled" — which invalidated the whole
 evaluation. Do not reintroduce revealing names in code, log messages, or
-comments that reach production output.
+comments that reach production output. Two tests in the application's
+repository (`tests/test_log_hygiene.py`) fail its build over exactly this.
+
+**Why two repositories.** The agent reads a repository's commits as evidence:
+per commit it receives the subject line and the changed file paths
+(`changes.py:272,292`). While one repository held both halves, commit `31edd00`
+would have handed it *"Fix the adversarial scenarios and check the definitions
+offline"* alongside `evals/scenarios.py` — telling it that it is being
+evaluated, that the scenarios are adversarial, and where the answers live.
+
+That was prevented only by a rule a human had to remember on every commit, and
+breaking it would have been silent and retroactive: you would not know which
+run was contaminated. `GITHUB_REPO` now names a repository that physically does
+not contain `evals/`, so the leak is impossible rather than merely forbidden.
+The same argument as enforcing safety at the IAM boundary instead of in the
+prompt, and the same one behind the agent never reading its own log group.
+
+`evals/target_app_contract.py` mirrors the application's failure modes because
+the import is gone. Copies drift, so `harness.check_modes_against_deployment()`
+asks the deployed application what it actually offers before every sweep.
 
 **Scope every query to this project.** `Config.TARGET_LOG_GROUPS` and
 `TARGET_FUNCTIONS` are allow-lists; tools resolve short names (`"api"`,
@@ -153,13 +175,13 @@ least for these scenarios.
 
 **Written but never run against AWS:**
 
-- the approval gate and executor (63 offline tests, no Lambda deployed)
-- the dashboard (`frontend/index.html`, never rendered live data)
 - the Terraform config (`terraform validate` passes; `plan` has never run
   against real credentials)
 
-Those three are the gap between "the code exists" and "the system works", and
-none of them is covered by the baseline.
+The approval gate and executor **are** deployed. The dashboard now renders live
+data and can drive the application itself — see its "How to run" panel — which
+leaves Terraform as the only remaining gap between "the code exists" and "the
+system works". None of it is covered by the baseline.
 
 **Not started:** the write-up. Terraform now exists but has not replaced the
 console-built stack — it deploys a parallel one under a different `owner`.
@@ -289,7 +311,7 @@ the real pipeline reacting to the same errors.
 | alarm will not fire | it only publishes on a state *transition* — force OK then ALARM |
 | JSON args rejected by the CLI | PowerShell passes backslashes literally — use a here-string or `ConvertTo-Json` |
 | GitHub commit window silently matches nothing | `datetime.isoformat()` renders UTC as `+00:00`, and a bare `+` decodes to a space in a query string — encode the params, or use the `Z` form |
-| agent learns the failures are injected | anything that reaches its evidence: a log message, **a commit subject line**, or repo file *contents* if it ever gets read access. Paths and file bodies are not fetched today; messages are |
+| agent learns the failures are injected | anything that reaches its evidence: a log message, **a commit subject line**, or **a changed file path** — `changes.py:292` fetches paths per commit. File *bodies* are not fetched. Splitting the repositories removes the commit half structurally |
 | Lambda loses `INCIDENTS_TABLE` after a config change | `update-function-configuration --environment` **replaces** the whole variable map — read, merge, write, or use the console |
 | CI fails before running any test | `actions/setup-python` with `cache: pip` globs for `requirements.txt`/`pyproject.toml` and errors when neither exists — set `cache-dependency-path` |
 | two unrelated edits land in one commit | `git add <file>` stages the whole file; splitting them afterwards needs `reset --soft` and a temporary revert |

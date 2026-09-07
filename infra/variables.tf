@@ -44,22 +44,10 @@ variable "tags" {
 // what the agent is allowed to investigate
 // --------------------------------------------------------------------------
 
-variable "create_target_app" {
-  description = <<-EOT
-    Deploy the bundled demo application that fails on purpose.
-
-    Leave true to get a working system from a single `apply` — without
-    something that breaks, the pipeline has nothing to investigate and the
-    deployment is inert. Set false when pointing Sentry at applications you
-    already run, and populate `investigation_targets` instead.
-  EOT
-  type        = bool
-  default     = true
-}
-
 variable "investigation_targets" {
   description = <<-EOT
-    Applications the agent may investigate, when create_target_app is false.
+    Applications the agent may investigate. Required — Sentry deploys none of
+    them, so without this it has nothing to watch.
 
     Anything that writes to CloudWatch Logs and emits CloudWatch metrics works:
     Lambda, ECS, EKS via Container Insights, EC2 with the agent. `name` is the
@@ -133,6 +121,33 @@ variable "github_repo" {
     The token itself is NEVER supplied through Terraform. This creates an empty
     secret; populate it out of band so the value never enters a plan, a state
     file, or a CI log. See the README.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "app_flag_table" {
+  description = <<-EOT
+    DynamoDB table holding feature flags the executor may DISABLE, or "" to
+    withhold that remediation entirely.
+
+    Turning a flag off is the recoverable direction, so it is the only write
+    granted here; the executor can never turn one on. Naming no table means the
+    permission is not granted at all rather than granted and unused — with the
+    remediation unavailable, the agent escalates to a human instead, which is
+    the correct behaviour when the system cannot act safely.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "dlq_queue_name" {
+  description = <<-EOT
+    Queue whose depth should raise an incident, or "" for none.
+
+    Separate from investigation_targets because that list carries log groups
+    and functions, not queues. A filling dead-letter queue is often the only
+    signal that a consumer is failing silently.
   EOT
   type        = string
   default     = ""

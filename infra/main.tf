@@ -71,20 +71,10 @@ locals {
 
   lambda_prefix = "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function"
 
-  # Targets come from the bundled demo app, or from the caller. Resolved once
-  # here so nothing downstream has to care which.
-  targets = var.create_target_app ? [
-    {
-      name                 = "api"
-      log_group            = "/aws/lambda/${local.name["api"]}"
-      lambda_function_name = local.name["api"]
-    },
-    {
-      name                 = "consumer"
-      log_group            = "/aws/lambda/${local.name["consumer"]}"
-      lambda_function_name = local.name["consumer"]
-    },
-  ] : var.investigation_targets
+  # The applications this deployment may investigate. Sentry does not deploy
+  # any of them: what it watches is somebody else's software, including when
+  # that somebody is you.
+  targets = var.investigation_targets
 
   target_log_groups = [for t in local.targets : t.log_group]
 
@@ -112,8 +102,8 @@ locals {
 resource "terraform_data" "target_check" {
   lifecycle {
     precondition {
-      condition     = var.create_target_app || length(var.investigation_targets) > 0
-      error_message = "With create_target_app = false you must set investigation_targets, or the agent has nothing to investigate."
+      condition     = length(var.investigation_targets) > 0
+      error_message = "Set investigation_targets, or the agent has nothing to investigate."
     }
   }
 }

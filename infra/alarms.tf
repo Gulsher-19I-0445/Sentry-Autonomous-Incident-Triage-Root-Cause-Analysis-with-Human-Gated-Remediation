@@ -59,17 +59,17 @@ resource "aws_cloudwatch_metric_alarm" "latency" {
   ok_actions    = [aws_sns_topic.alarms.arn]
 }
 
-// Queue depth, only for the bundled demo app — an externally supplied target
-// list carries no queue for Sentry to reason about.
+// Queue depth. Optional: a target list carries log groups and functions, not
+// queues, so the queue to watch has to be named explicitly if there is one.
 resource "aws_cloudwatch_metric_alarm" "dlq_depth" {
-  count = var.create_target_app ? 1 : 0
+  count = var.dlq_queue_name != "" ? 1 : 0
 
   alarm_name        = "${var.project_name}-dlq-depth-${var.owner}"
   alarm_description = "Messages are accumulating in the dead letter queue."
 
   namespace   = "AWS/SQS"
   metric_name = "ApproximateNumberOfMessagesVisible"
-  dimensions  = { QueueName = aws_sqs_queue.orders_dlq[0].name }
+  dimensions  = { QueueName = var.dlq_queue_name }
 
   statistic           = "Maximum"
   period              = 60

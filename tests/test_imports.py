@@ -11,7 +11,6 @@ The module list is discovered rather than hardcoded, so a module added later is
 covered without anyone remembering to add it here.
 """
 
-import ast
 import importlib
 import pkgutil
 from pathlib import Path
@@ -23,24 +22,20 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 
 
 def _all_modules() -> list[str]:
-    """Every module under src/, both deployment bundles."""
-    found = []
-    for package in ("sentry", "target_app"):
-        pkg_path = SRC / package
-        found.append(package)
-        for info in pkgutil.walk_packages([str(pkg_path)], prefix=f"{package}."):
-            found.append(info.name)
+    """Every module in the deployment bundle."""
+    found = ["sentry"]
+    for info in pkgutil.walk_packages([str(SRC / "sentry")], prefix="sentry."):
+        found.append(info.name)
     return sorted(found)
 
 
 MODULES = _all_modules()
 
 
-def test_module_discovery_found_both_bundles():
+def test_module_discovery_found_the_bundle():
     """Guards the guard: an empty list would make every test below vacuous."""
     assert any(m.startswith("sentry.") for m in MODULES)
-    assert any(m.startswith("target_app.") for m in MODULES)
-    assert len(MODULES) >= 15, f"suspiciously few modules discovered: {MODULES}"
+    assert len(MODULES) >= 12, f"suspiciously few modules discovered: {MODULES}"
 
 
 @pytest.mark.parametrize("module_name", MODULES)
@@ -98,76 +93,3 @@ def test_agent_handler_exposes_tools_from_the_registry():
 
     assert isinstance(handler.TOOLS, list)
     assert len(handler.TOOLS) == 4, f"expected 4 registered tools, got {len(handler.TOOLS)}"
-
-
-BANNED = ("chaos", "fault_injection", "inject_failure", "simulate_failure",
-          "fault injection", "injected")
-
-
-def _log_message_literals(tree: ast.AST) -> list[tuple[int, str]]:
-    """The message argument of every log_event(...) / logger.x(...) call.
-
-    Scoped deliberately. Comments and docstrings never reach CloudWatch, so
-    grepping whole files produces false positives on the very comments that
-    explain the rule. What reaches the agent is the message string, the module
-    and function names in a traceback, and the source line a traceback renders.
-    """
-    found = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        target = node.func
-        name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
-
-        if name == "log_event":
-            args = node.args[2:3]          # log_event(logger, level, message, ...)
-        elif name in ("info", "warning", "error", "debug", "exception", "critical"):
-            args = node.args[:1]
-        else:
-            continue
-
-        for arg in args:
-            for sub in ast.walk(arg):
-                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
-                    found.append((node.lineno, sub.value))
-    return found
-
-
-@pytest.mark.parametrize("path", sorted((SRC / "target_app").rglob("*.py")),
-                         ids=lambda p: p.name)
-def test_target_app_log_messages_never_reveal_fault_injection(path):
-    """Everything target_app writes to stdout lands in a log group the agent
-    queries. A message saying the failure was injected makes the model report
-    the harness instead of the incident — which already invalidated one
-    evaluation run, and is worth failing the build over."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-    for lineno, literal in _log_message_literals(tree):
-        lowered = literal.lower()
-        for word in BANNED:
-            assert word not in lowered, (
-                f"{path.name}:{lineno} logs {literal!r}, which reaches "
-                f"/aws/lambda/sentry-capstone-*-gulsher — the agent reads that "
-                f"group as primary evidence"
-            )
-
-
-@pytest.mark.parametrize("path", sorted((SRC / "target_app").rglob("*.py")),
-                         ids=lambda p: p.name)
-def test_target_app_symbol_names_never_reveal_fault_injection(path):
-    """Module, class and function names appear in every stack trace. The
-    injection module is `_internal.py` with `_process_request`/`_apply` for
-    exactly this reason."""
-    assert not any(w in path.stem.lower() for w in BANNED), (
-        f"module name {path.name} appears in every traceback from it"
-    )
-
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            lowered = node.name.lower()
-            for word in BANNED:
-                assert word not in lowered, (
-                    f"{path.name}:{node.lineno} defines {node.name!r}; it will "
-                    f"appear in any stack trace passing through it"
-                )

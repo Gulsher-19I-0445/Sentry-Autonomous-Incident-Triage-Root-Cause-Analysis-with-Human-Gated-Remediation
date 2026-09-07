@@ -142,7 +142,7 @@ resource "aws_lambda_function" "executor" {
 
   environment {
     variables = merge(local.common_env, {
-      APP_TABLE  = var.create_target_app ? aws_dynamodb_table.app[0].name : ""
+      APP_TABLE  = var.app_flag_table
       LIVE_ALIAS = "live"
     })
   }

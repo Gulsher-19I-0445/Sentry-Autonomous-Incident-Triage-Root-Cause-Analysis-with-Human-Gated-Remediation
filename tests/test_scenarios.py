@@ -10,7 +10,7 @@ for a scenario that was working correctly the whole time.
 import pytest
 
 import scenarios as sc
-from target_app.common._internal import MODES
+from target_app_contract import MODES
 
 
 ALL = sc.ALL

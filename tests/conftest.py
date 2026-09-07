@@ -4,8 +4,8 @@ Everything in this file exists so the suite runs with NO AWS credentials and NO
 network access. Two properties of the codebase force its shape:
 
   * several modules read env vars at import time (`os.environ["INCIDENTS_TABLE"]`
-    in common/incidents.py, `QUEUE_URL` in target_app/api/handler.py), so those
-    vars must be set before the first import — a fixture runs too late.
+    in common/incidents.py), so those vars must be set before the first import
+    — a fixture runs too late.
   * every tool module constructs its boto3 client at module level, so a region
     has to be resolvable or construction raises NoRegionError.
 
@@ -50,8 +50,6 @@ os.environ.update({
     # Read at import time by the modules under test.
     "INCIDENTS_TABLE": "sentry-capstone-incidents-test",
     "WORK_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/000000000000/work-test",
-    "QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/000000000000/orders-test",
-    "TABLE_NAME": "sentry-capstone-app-test",
 
     # GitHub is intentionally unconfigured — changes.py must degrade to
     # CloudTrail-only, and that path is asserted in test_tool_payloads.

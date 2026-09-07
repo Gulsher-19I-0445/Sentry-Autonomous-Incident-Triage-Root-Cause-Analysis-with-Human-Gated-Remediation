@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 import boto3
 
 import scenarios as sc
+from target_app_contract import MODES as CONTRACT_MODES
 from scoring import Result, failed, score, summarize, variance_by_scenario
 from botocore.config import Config as BotoConfig
 
@@ -119,9 +120,55 @@ def arm(mode: str, remaining: int) -> None:
     _admin("POST", f"/admin/chaos/{mode}", {"remaining": remaining, "ttl_seconds": 600})
 
 
+def check_modes_against_deployment() -> None:
+    """Fail the sweep if the deployed application no longer offers a mode a
+    scenario arms.
+
+    The application is a separate deployable in a separate repository now, so
+    `target_app_contract.MODES` is a copy and copies drift. This compares
+    against reality instead of against another copy.
+
+    Arming an unknown mode is rejected with the list of real ones before any
+    flag is written, so this costs one invoke and changes nothing. The failure
+    it prevents is silent: a renamed mode arms nothing, every scenario using it
+    reports "did not reproduce", and the sweep reads as a finding rather than a
+    fault in the harness.
+    """
+    out = _admin("POST", "/admin/chaos/__preflight__")
+    payload = out.get("body") or {}
+
+    try:
+        inner = json.loads(payload.get("body") or "{}")
+    except (TypeError, ValueError):
+        inner = {}
+
+    available = set(inner.get("available") or [])
+    if not available:
+        # A 403 lands here too, and is worth naming separately: it means the
+        # token is wrong or unset, not that the modes have changed.
+        raise RuntimeError(
+            f"could not read the mode list from {API_FN} (status "
+            f"{payload.get('statusCode')!r}, body {inner!r}). Check ADMIN_TOKEN."
+        )
+
+    expected = set(CONTRACT_MODES)
+    missing = expected - available
+    if missing:
+        raise RuntimeError(
+            f"{API_FN} does not offer {sorted(missing)}. target_app_contract.py "
+            f"has drifted from the deployed application, which offers "
+            f"{sorted(available)}. Arming a missing mode does nothing and every "
+            f"scenario using it would report 'did not reproduce'."
+        )
+
+    added = available - expected
+    if added:
+        print(f"  note: application offers {sorted(added)}, "
+              f"absent from target_app_contract.py")
+
+
 def disarm_all() -> None:
-    for mode in ["exception", "slow", "memory", "timeout", "denied",
-                 "bad_payload", "missing_env", "retry_storm", "silent"]:
+    for mode in CONTRACT_MODES:
         try:
             _admin("DELETE", f"/admin/chaos/{mode}")
         except Exception:
@@ -411,6 +458,10 @@ def main() -> int:
     # purge, so per-scenario draining is not possible. Stale messages are also
     # the one contamination source no time window excludes — depth and age are
     # metrics, not log lines.
+    # Before anything is armed: a drifted mode name fails here rather than
+    # as nine scenarios that quietly did not reproduce.
+    check_modes_against_deployment()
+
     drain_dead_letter_queues()
     print()
     started = time.time()

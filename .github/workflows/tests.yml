@@ -39,8 +39,8 @@ jobs:
       - name: Run tests
         run: python -m pytest -v
 
-      - name: Check the Lambda bundles import cleanly on their own
-        # The zips are built with src/ as the root, so a module that only
+      - name: Check the Lambda bundle imports cleanly on its own
+        # The zip is built with src/ as the root, so a module that only
         # imports because the repo root is on sys.path would fail at cold start.
         run: |
           cd src

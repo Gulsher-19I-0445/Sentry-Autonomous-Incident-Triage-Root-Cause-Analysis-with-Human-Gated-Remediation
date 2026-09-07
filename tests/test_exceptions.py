@@ -105,7 +105,7 @@ def test_named_error_classes_derive_from_exception():
     import pkgutil
 
     suspects = []
-    for package in ("sentry", "target_app"):
+    for package in ("sentry",):
         for info in pkgutil.walk_packages([str(SRC / package)], prefix=f"{package}."):
             module = importlib.import_module(info.name)
             for attr in dir(module):

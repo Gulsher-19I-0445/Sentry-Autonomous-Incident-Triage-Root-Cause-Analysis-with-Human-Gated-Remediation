@@ -1,8 +1,15 @@
 # Deploying Sentry
 
-One `apply` gives you the whole system: an application that fails on purpose, a
-pipeline that notices, an agent that investigates, and a gate a human approves
-through.
+One `apply` gives you Sentry: a pipeline that notices an alarm, an agent that
+investigates it, and a gate a human approves through. It deploys none of the
+applications it watches — what it watches is software you already run, listed
+in `investigation_targets`.
+
+The demo application used to develop and evaluate this lives in its own
+repository and is deployed separately. Keeping it out is not tidiness: the
+agent reads a repository's commit subjects and changed file paths as evidence,
+so the repository it reads must not also contain the evaluation's ground
+truth.
 
 Nothing here is specific to the account it was written in. Every name is built
 from `project_name` and `owner`, so two people can deploy into the same account
@@ -21,33 +28,34 @@ without colliding.
 
 ```bash
 cd infra
-cp terraform.tfvars.example terraform.tfvars   # set `owner` at minimum
+cp terraform.tfvars.example terraform.tfvars   # set `owner` and investigation_targets
 terraform init
 terraform plan          # read this before applying
 terraform apply
 ```
+
+`investigation_targets` is required. An apply with none fails at plan time
+rather than deploying something inert.
 
 Then wire up the dashboard:
 
 ```bash
 cp frontend/config.example.json frontend/config.json
 
-terraform output -raw approval_url        # -> config.json
-terraform output -raw target_api_url      # -> config.json
-terraform output -raw approval_token      # paste into the page
-terraform output -raw target_admin_token  # paste into the page
+terraform output -raw approval_url    # -> config.json
+terraform output -raw approval_token  # paste into the page
 ```
 
-`config.json` holds only the two endpoint URLs, so it is safe to deploy next to
-the page; the tokens stay out of it and are pasted by whoever opens it. Open
+`config.json` holds only endpoint URLs, so it is safe to deploy next to the
+page; tokens stay out of it and are pasted by whoever opens it. Open
 `frontend/index.html` and you have the dashboard. The page works without
 `config.json` too — there is just nothing prefilled.
 
-**"How to run"** in the header explains the system and drives it: pick a failure
-mode, arm it, send traffic, and watch the incident arrive. That is the whole
-point of giving the target app a Function URL with CORS — the demo is
-explorable by someone with no AWS credentials and no terminal, which is what
-makes it shareable.
+The application being watched is deployed separately, so its URL and admin
+token are not outputs here. Supply them and **"How to run"** in the header
+becomes a control surface: pick a failure mode, arm it, send traffic, and watch
+the incident arrive, with no AWS credentials and no terminal. Leave them out
+and the dashboard still works, without the run controls.
 
 `frontend/preview.html` is the same page with every endpoint faked. Share that
 when someone should see the system without being handed real tokens.
@@ -73,11 +81,9 @@ rather than failing.
 
 Use a fine-grained PAT with **contents: read** on one repository. Nothing more.
 
-## Investigating your own applications
+## Choosing what to investigate
 
 ```hcl
-create_target_app = false
-
 investigation_targets = [
   {
     name                 = "checkout"
@@ -101,7 +107,13 @@ when the system cannot act safely, not a degraded mode.
 
 Alarms are created automatically for Lambda targets. For anything else, define
 your own and point them at the `alarms` SNS topic — the metric names and
-dimensions depend on the service.
+dimensions depend on the service. `dlq_queue_name` adds a queue-depth alarm,
+which is often the only signal that a consumer is failing silently.
+
+`app_flag_table` names a DynamoDB table whose feature flags the executor may
+turn **off**, never on. Leave it unset and that remediation is withheld
+entirely: the agent escalates to a human instead, which is the designed
+behaviour when the system cannot act safely.
 
 ## What the IAM boundary is doing
 
@@ -123,24 +135,22 @@ check that nothing in the agent's grants any verb that changes state.
 
 ## Security notes
 
-- **State contains secrets in plaintext** — the generated approval token, the
-  demo app's admin token. `*.tfstate` is gitignored; keep it that way, and
-  don't paste plan output into a public issue.
+- **State contains the generated approval token in plaintext.** `*.tfstate` is
+  gitignored; keep it that way, and don't paste plan output into a public
+  issue.
 - **`terraform.tfvars` is gitignored.** Only the `.example` is committed.
 - **The approval Function URL is public** with `authorization_type = NONE`. The
   shared token in the `x-approval-token` header is the only gate, and the
   handler fails closed when it is unset. That stops an accidental request, not
   a determined attacker — put an authorizer in front for anything real.
-- **The demo app's endpoint is public too**, and its CORS policy allows any
-  origin, so any page can call it from a browser. That is what makes the shared
-  dashboard work. It stores nothing sensitive and the admin routes are
-  token-gated, but it exists to be broken. Destroy it when you are done.
-- **There is no rate limit on either URL.** Fine for a link shared with a few
-  people, which is what this assumes. Anyone who has the admin token can arm
-  failures in a loop, and each resulting investigation costs real money —
+- **There is no rate limit on the approval URL.** Fine for a link shared with a
+  few people, which is what this assumes. Each investigation costs real money —
   budget roughly $0.13 a time. If the dashboard is going somewhere genuinely
   public, put API Gateway with a usage plan in front rather than relying on the
   token alone.
+- **The application being watched is deployed separately** and has its own
+  exposure to reason about. If it carries a Function URL so the dashboard can
+  drive it, that endpoint is public; see that repository's README.
 
 ## Cost
 

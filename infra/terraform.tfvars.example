@@ -11,30 +11,35 @@ owner = "yourname"
 # aws_region   = "us-east-1"
 # project_name = "sentry"
 
-# Deploy the bundled application that fails on purpose. Leave true for a
-# working system from a single apply; without it the pipeline has nothing to
-# investigate.
-# create_target_app = true
-
-# Point Sentry at applications you already run. Only used when
-# create_target_app = false. Anything writing to CloudWatch Logs works —
-# Lambda, ECS, EKS via Container Insights.
+# REQUIRED. The applications Sentry may investigate. It deploys none of them —
+# what it watches is software you already run. Anything writing to CloudWatch
+# Logs works: Lambda, ECS, EKS via Container Insights, EC2 with the agent.
 #
 # lambda_function_name is optional and only meaningful for Lambda: it is what
 # makes automated rollback possible. Targets without it are still investigated,
 # but remediation is escalated to a human rather than applied.
-#
-# investigation_targets = [
-#   {
-#     name                 = "checkout"
-#     log_group            = "/aws/lambda/checkout-prod"
-#     lambda_function_name = "checkout-prod"
-#   },
-#   {
-#     name      = "orders-api"
-#     log_group = "/ecs/orders-api"
-#   },
-# ]
+investigation_targets = [
+  {
+    name                 = "checkout"
+    log_group            = "/aws/lambda/checkout-prod"
+    lambda_function_name = "checkout-prod"
+  },
+  {
+    name      = "orders-api"
+    log_group = "/ecs/orders-api"
+  },
+]
+
+# A queue whose depth should raise an incident. Not covered by
+# investigation_targets, which carries log groups and functions rather than
+# queues. Often the only signal that a consumer is failing silently.
+# dlq_queue_name = "orders-dlq"
+
+# DynamoDB table holding feature flags the executor may DISABLE. Off is the
+# recoverable direction and the only write granted; it can never turn one on.
+# Leave unset to withhold that remediation, in which case the agent escalates
+# to a human instead — the correct behaviour when it cannot act safely.
+# app_flag_table = "orders-app"
 
 # Let the agent read commits as evidence. The TOKEN IS NOT SET HERE — Terraform
 # creates an empty secret and you populate it out of band, so the value never
