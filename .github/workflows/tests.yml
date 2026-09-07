@@ -44,12 +44,12 @@ jobs:
         # imports because the repo root is on sys.path would fail at cold start.
         run: |
           cd src
-          INCIDENTS_TABLE=ci WORK_QUEUE_URL=ci QUEUE_URL=ci TABLE_NAME=ci \
+          INCIDENTS_TABLE=ci WORK_QUEUE_URL=ci \
           AWS_DEFAULT_REGION=us-east-1 \
           python -c "
           import importlib
           for m in ('sentry.agent.handler', 'sentry.ingest.handler',
-                    'target_app.api.handler', 'target_app.consumer.handler'):
+                    'sentry.approval.handler', 'sentry.executor.handler'):
               importlib.import_module(m)
               print('ok', m)
           "
