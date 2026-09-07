@@ -36,10 +36,14 @@ REGION = "us-east-1"
 API_FN = "sentry-capstone-api-gulsher"
 AGENT_FN = "sentry-capstone-agent-gulsher"
 TABLE = "sentry-capstone-incidents-gulsher"
-# Gates the endpoints that arm a failure mode on the target app. Read from
-# the environment so a real token is never written down here: Terraform
-# generates one per deployment (terraform output -raw target_admin_token).
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "devtoken123")
+# Gates the endpoints that arm a failure mode on the target app. Read from the
+# environment so a real token is never written down here: Terraform generates
+# one per deployment (terraform output -raw target_admin_token).
+#
+# No default. The previous one was a working credential for a deployed stack,
+# in a public repository — and the endpoint it opens is reachable without AWS
+# credentials, so it was a key, not a placeholder.
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 _logs = boto3.client("logs", region_name=REGION)
 INGESTION_WAIT_S = 25      # CloudWatch logs lag; the agent retries once too
 SETTLE_S = 3
@@ -104,6 +108,14 @@ def _admin(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def arm(mode: str, remaining: int) -> None:
+    # Fail loudly. Without a token the admin route answers 403, arming quietly
+    # does nothing, and every scenario reports "did not reproduce" — a whole
+    # sweep's worth of results that look like findings and are not.
+    if not ADMIN_TOKEN:
+        raise RuntimeError(
+            "ADMIN_TOKEN is not set, so no failure mode can be armed. Set it "
+            "first:  $env:ADMIN_TOKEN = (terraform output -raw target_admin_token)"
+        )
     _admin("POST", f"/admin/chaos/{mode}", {"remaining": remaining, "ttl_seconds": 600})
 
 
