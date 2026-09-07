@@ -27,14 +27,30 @@ terraform plan          # read this before applying
 terraform apply
 ```
 
-Then:
+Then wire up the dashboard:
 
 ```bash
-terraform output -raw approval_url      # paste into frontend/index.html
-terraform output -raw approval_token
+cp frontend/config.example.json frontend/config.json
+
+terraform output -raw approval_url        # -> config.json
+terraform output -raw target_api_url      # -> config.json
+terraform output -raw approval_token      # paste into the page
+terraform output -raw target_admin_token  # paste into the page
 ```
 
-Open `frontend/index.html` in a browser, paste both, and you have the dashboard.
+`config.json` holds only the two endpoint URLs, so it is safe to deploy next to
+the page; the tokens stay out of it and are pasted by whoever opens it. Open
+`frontend/index.html` and you have the dashboard. The page works without
+`config.json` too — there is just nothing prefilled.
+
+**"How to run"** in the header explains the system and drives it: pick a failure
+mode, arm it, send traffic, and watch the incident arrive. That is the whole
+point of giving the target app a Function URL with CORS — the demo is
+explorable by someone with no AWS credentials and no terminal, which is what
+makes it shareable.
+
+`frontend/preview.html` is the same page with every endpoint faked. Share that
+when someone should see the system without being handed real tokens.
 
 ## The GitHub token is deliberately not managed here
 
@@ -115,9 +131,16 @@ check that nothing in the agent's grants any verb that changes state.
   shared token in the `x-approval-token` header is the only gate, and the
   handler fails closed when it is unset. That stops an accidental request, not
   a determined attacker — put an authorizer in front for anything real.
-- **The demo app's endpoint is public too.** It stores nothing sensitive and
-  the admin routes are token-gated, but it exists to be broken. Destroy it when
-  you are done.
+- **The demo app's endpoint is public too**, and its CORS policy allows any
+  origin, so any page can call it from a browser. That is what makes the shared
+  dashboard work. It stores nothing sensitive and the admin routes are
+  token-gated, but it exists to be broken. Destroy it when you are done.
+- **There is no rate limit on either URL.** Fine for a link shared with a few
+  people, which is what this assumes. Anyone who has the admin token can arm
+  failures in a loop, and each resulting investigation costs real money —
+  budget roughly $0.13 a time. If the dashboard is going somewhere genuinely
+  public, put API Gateway with a usage plan in front rather than relying on the
+  token alone.
 
 ## Cost
 

@@ -56,9 +56,17 @@ output "next_steps" {
   description = "What to do once apply finishes."
   value       = <<-EOT
 
-    1. Open frontend/index.html and paste:
-         URL    terraform output -raw approval_url
-         token  terraform output -raw approval_token
+    1. Point the dashboard at this deployment:
+         cp frontend/config.example.json frontend/config.json
+       then fill in both URLs, which are not secret:
+         terraform output -raw approval_url
+         terraform output -raw target_api_url
+
+       Open frontend/index.html and paste the two tokens, which are:
+         terraform output -raw approval_token
+         terraform output -raw target_admin_token
+       Deploy config.json alongside the page and anyone you share it with only
+       has to paste those two. Use "How to run" in the page to drive it.
 
     ${local.github_enabled ? "2. Populate the GitHub secret (Terraform never sees it):\n         aws secretsmanager put-secret-value --secret-id ${local.name["github"]} --secret-string '{\"token\":\"github_pat_...\"}'\n" : "2. GitHub is disabled. Set github_repo to let the agent read commits as evidence.\n"}
     3. Bedrock model access must be granted for ${var.agent_model_id}

@@ -246,4 +246,19 @@ resource "aws_lambda_function_url" "target_api" {
 
   # The demo app is deliberately reachable so traffic can be driven against it.
   # It stores nothing sensitive; the admin routes are token-gated.
+
+  # Without this the dashboard cannot drive the app from a browser. CORS is not
+  # an authorisation boundary — the admin token still gates the admin routes —
+  # it only decides whose JavaScript may read the reply. Naming x-admin-token
+  # matters twice over: sending it is what forces a preflight in the first
+  # place, so omitting it here fails the request before it is ever attempted.
+  #
+  # DELETE is here and absent from the approval gate's list because disarming a
+  # mode is a DELETE and the gate has no delete route.
+  cors {
+    allow_origins = ["*"]
+    allow_methods = ["GET", "POST", "DELETE"]
+    allow_headers = ["content-type", "x-admin-token"]
+    max_age       = 3600
+  }
 }
