@@ -1,6 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Sentry — incident triage</title>
 <!--
   One file, no build step, no framework — matching the project's stdlib-only
@@ -11,18 +12,53 @@
   is anything happening, must I decide something, is anything broken that
   nobody is handling, and what happened recently.
 -->
+
+<!-- Before the stylesheet, deliberately: setting data-theme after first paint
+     shows the wrong palette for a frame. Small enough to stay inline. -->
+<script>
+  try {
+    const t = localStorage.getItem("sentry_theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) { /* localStorage can throw in a sandboxed frame; system default is fine */ }
+</script>
+
 <style>
+  /* Three blocks, and the order is load-bearing.
+
+     The last two selectors have equal specificity, so the explicit choice must
+     come last to win on a light-mode OS, and the :not() guard is what lets an
+     explicit light choice win on a dark-mode OS. Defining a colour in only one
+     block would leave it undefined in the other two. */
   :root {
+    color-scheme: light;
     --bg:#faf9f7; --panel:#fff; --line:#e3dfd7; --ink:#211e1a; --muted:#6f6961;
     --accent:#8a5a2b; --ok:#2f6b4f; --warn:#9a6a1b; --bad:#a33a2a;
     --shadow:0 1px 2px rgba(0,0,0,.05);
+    --shadow-panel:-4px 0 20px rgba(0,0,0,.08);
+    --scrim:rgba(0,0,0,.25);
+    /* Text on a filled --ok/--bad button. White works on the dark light-mode
+       fills; on the lighter dark-mode fills it does not, so it flips. */
+    --on-solid:#fff;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --bg:#15140f; --panel:#1e1c18; --line:#332f29; --ink:#ebe7e0; --muted:#9c958b;
       --accent:#d79b62; --ok:#6fbf95; --warn:#d8ab5a; --bad:#e0806e;
       --shadow:0 1px 2px rgba(0,0,0,.3);
+      --shadow-panel:-4px 0 26px rgba(0,0,0,.5);
+      --scrim:rgba(0,0,0,.5);
+      --on-solid:#15140f;
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#15140f; --panel:#1e1c18; --line:#332f29; --ink:#ebe7e0; --muted:#9c958b;
+    --accent:#d79b62; --ok:#6fbf95; --warn:#d8ab5a; --bad:#e0806e;
+    --shadow:0 1px 2px rgba(0,0,0,.3);
+    --shadow-panel:-4px 0 26px rgba(0,0,0,.5);
+    --scrim:rgba(0,0,0,.5);
+    --on-solid:#15140f;
   }
   * { box-sizing:border-box; }
   body {
@@ -104,8 +140,8 @@
     flex:1; padding:5px 0; border-radius:6px; border:1px solid var(--line);
     background:var(--bg); color:var(--ink); cursor:pointer; font-size:12.5px;
   }
-  .btns .yes:hover { background:var(--ok); border-color:var(--ok); color:#fff; }
-  .btns .no:hover  { background:var(--bad); border-color:var(--bad); color:#fff; }
+  .btns .yes:hover { background:var(--ok); border-color:var(--ok); color:var(--on-solid); }
+  .btns .no:hover  { background:var(--bad); border-color:var(--bad); color:var(--on-solid); }
   .btns button:disabled { opacity:.4; cursor:not-allowed; }
 
   .working { display:inline-block; width:6px; height:6px; border-radius:50%;
@@ -123,7 +159,7 @@
     background:var(--panel); border-left:1px solid var(--line);
     transform:translateX(100%); transition:transform .16s ease-out;
     overflow-y:auto; padding:18px 20px 40px; z-index:20;
-    box-shadow:-4px 0 20px rgba(0,0,0,.08);
+    box-shadow:var(--shadow-panel);
   }
   #panel.open { transform:none; }
   @media (prefers-reduced-motion: reduce) { #panel { transition:none } }
@@ -154,20 +190,100 @@
   .msg { font-size:12.5px; color:var(--muted); margin-top:8px; }
   .err { color:var(--bad); padding:20px; }
   #scrim {
-    position:fixed; inset:0; background:rgba(0,0,0,.25); z-index:19; display:none;
+    position:fixed; inset:0; background:var(--scrim); z-index:19; display:none;
   }
   #scrim.open { display:block; }
+
+  /* ---- how-to-run panel -------------------------------------------- */
+  /* Same slide-over mechanics as #panel, sharing #scrim so there is one
+     dismissal model. Wider, because it holds prose and code rather than a
+     key/value list. */
+  #howto {
+    position:fixed; top:0; right:0; bottom:0; width:min(560px, 100%);
+    background:var(--panel); border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .16s ease-out;
+    overflow-y:auto; padding:18px 20px 40px; z-index:20;
+    box-shadow:var(--shadow-panel);
+  }
+  #howto.open { transform:none; }
+  @media (prefers-reduced-motion: reduce) { #howto { transition:none } }
+  #howto h3 { margin:0 0 2px; font-size:14.5px; }
+  #howto .close { position:absolute; top:14px; right:16px; }
+  #howto section { margin-top:20px; }
+  #howto section > h4 {
+    margin:0 0 6px; font-size:11px; letter-spacing:.7px; text-transform:uppercase;
+    color:var(--muted); font-weight:650;
+  }
+  #howto p { margin:0 0 8px; font-size:13px; }
+  #howto ol, #howto ul { margin:0; padding-left:18px; font-size:13px; }
+  #howto li { margin-bottom:6px; }
+  #howto code { background:var(--bg); border:1px solid var(--line); border-radius:4px;
+                padding:1px 5px; }
+  #howto select, #howto input[type=number] {
+    padding:6px 9px; border:1px solid var(--line); border-radius:6px;
+    background:var(--bg); color:var(--ink); max-width:100%;
+  }
+  #howto select { width:100%; }
+
+  /* The flow diagram. A list styled as a chain, so it stays readable when
+     copied out and needs no SVG. */
+  .flow { display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+          list-style:none; padding:0; margin:0 0 10px; font-size:12px; }
+  .flow li { background:var(--bg); border:1px solid var(--line); border-radius:5px;
+             padding:2px 8px; font-family:ui-monospace, monospace; }
+  .flow li::after { content:"→"; margin-left:8px; color:var(--muted); }
+  .flow li:last-child::after { content:""; margin-left:0; }
+
+  .step { border-left:2px solid var(--line); padding:0 0 2px 12px; margin-bottom:14px; }
+  .step > b { font-size:12.5px; display:block; margin-bottom:5px; }
+  .step .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .step .hint { font-size:12px; color:var(--muted); margin-top:5px; }
+  .step.done { border-left-color:var(--ok); }
+
+  #howto button.go {
+    padding:5px 12px; border-radius:6px; border:1px solid var(--line);
+    background:var(--bg); color:var(--ink); cursor:pointer; font-size:12.5px;
+  }
+  #howto button.go:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  #howto button.go:disabled { opacity:.4; cursor:not-allowed; }
+  #howto button.go.danger:hover:not(:disabled) { border-color:var(--bad); color:var(--bad); }
+
+  .out { font-size:12px; color:var(--muted); margin-top:7px; min-height:1em;
+         font-variant-numeric:tabular-nums; }
+  .out.bad { color:var(--bad); }
+  .out.ok  { color:var(--ok); }
+
+  /* Shown in place of the buttons until both target-app values are set. */
+  .needs-cfg {
+    font-size:12.5px; color:var(--warn); border:1px dashed var(--warn);
+    border-radius:6px; padding:8px 10px; margin-bottom:12px;
+  }
+  .needs-cfg button { margin-top:6px; }
+
+  #howto details { margin-top:8px; }
+  #howto summary { cursor:pointer; font-size:12.5px; color:var(--muted); }
+  #howto summary:hover { color:var(--accent); }
+  #howto pre {
+    background:var(--bg); border:1px solid var(--line); border-radius:6px;
+    padding:10px; overflow-x:auto; font-size:11.5px; margin:8px 0 0;
+    font-family:ui-monospace, monospace; line-height:1.45;
+  }
+  #howto pre code { background:none; border:0; padding:0; }
 </style>
 
 <header>
   <h1>Sentry <span>· incident triage</span></h1>
   <div class="verdict" id="verdict">Not connected</div>
   <label class="toggle"><input type="checkbox" id="auto"> auto-refresh</label>
+  <button class="chip" id="guide">How to run</button>
+  <button class="chip" id="theme" title="Switch between light, dark and your system setting"></button>
   <button class="chip" id="cfg">connection</button>
   <button class="chip" id="refresh">Refresh</button>
   <div id="setup">
     <input id="url" placeholder="approval gate URL">
     <input id="token" placeholder="approval token" type="password">
+    <input id="target" placeholder="target app URL (optional — enables the run panel)">
+    <input id="admin" placeholder="admin token" type="password">
   </div>
 </header>
 
@@ -175,10 +291,35 @@
 
 <div id="scrim"></div>
 <aside id="panel" aria-live="polite"></aside>
+<aside id="howto" aria-live="polite"></aside>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const store = sessionStorage;
+
+// ---- theme -----------------------------------------------------------
+// localStorage, not the sessionStorage used for everything else. The tokens
+// live no longer than the tab because they are shared secrets; a theme
+// preference is neither secret nor per-tab, and someone opening a shared link
+// should not have to re-pick it every visit.
+const THEMES = ["system", "light", "dark"];
+const THEME_LABEL = { system: "◑ System", light: "☀ Light", dark: "☾ Dark" };
+
+function currentTheme() {
+  try { return document.documentElement.dataset.theme || "system"; }
+  catch { return "system"; }
+}
+
+function applyTheme(next) {
+  if (next === "system") {
+    delete document.documentElement.dataset.theme;
+    try { localStorage.removeItem("sentry_theme"); } catch {}
+  } else {
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("sentry_theme", next); } catch {}
+  }
+  $("theme").textContent = THEME_LABEL[next];
+}
 
 // Ten statuses, four questions. The enum is an implementation detail; what an
 // operator wants to know is whether they have to do something.
@@ -234,6 +375,63 @@ async function call(path, options = {}) {
   if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
   return body;
 }
+
+// ---- target app ------------------------------------------------------
+// A second, separate endpoint: the application under observation, not the
+// pipeline watching it. Different URL, different token, and unlike the gate it
+// is expected to fail — a 502 here means the fault fired, which is the point.
+async function callTarget(path, options = {}) {
+  const base = $("target").value.trim().replace(/\/$/, "");
+  const token = $("admin").value.trim();
+  if (!base) throw new Error("Set the target app URL.");
+  store.setItem("target_url", base);
+  store.setItem("admin_token", token);
+
+  const res = await fetch(base + path, {
+    ...options,
+    headers: { "content-type":"application/json", "x-admin-token":token,
+               ...(options.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
+// Mirrors MODES in src/target_app/common/_internal.py. Transcribed rather than
+// generated because the browser cannot import Python; if a mode is added there,
+// add it here. `note` exists for the modes whose observable behaviour surprises
+// people — without it they look like nothing happened.
+const MODES = [
+  { mode:"exception",   fails:"api",      alarm:"api-errors",
+    desc:"Unhandled KeyError on a missing field" },
+  { mode:"bad_payload", fails:"consumer", alarm:"consumer-errors",
+    desc:"API enqueues a message the consumer cannot parse",
+    note:"The API returns 201 and looks healthy — the consumer is what breaks. " +
+         "Alarm fires on a component that is not the faulty one." },
+  { mode:"missing_env", fails:"consumer", alarm:"consumer-errors",
+    desc:"Required environment variable absent" },
+  { mode:"denied",      fails:"consumer", alarm:"consumer-errors",
+    desc:"Genuine IAM AccessDenied reaching S3" },
+  { mode:"memory",      fails:"consumer", alarm:"consumer-errors",
+    desc:"Unbounded allocation exhausts the 256MB limit",
+    note:"The runtime is killed, so there is no application log line at all — " +
+         "only Lambda's own REPORT line." },
+  { mode:"slow",        fails:"api",      alarm:"api-latency",
+    desc:"Slow dependency call breaching latency p95",
+    note:"Produces no errors. Trips the latency alarm (Duration > 3000ms), and " +
+         "each request blocks for 4.5s, so the traffic burst takes a while." },
+  { mode:"silent",      fails:"consumer", alarm:"consumer-errors",
+    desc:"Failure with the real cause swallowed",
+    note:"Minimal evidence by design. The agent should abstain and escalate " +
+         "rather than name a cause." },
+  { mode:"timeout",     fails:"consumer", alarm:"consumer-errors",
+    desc:"Handler exceeds its configured timeout",
+    warn:"Sleeps 300s against a 90s queue visibility timeout, so messages " +
+         "redeliver for a while after you disarm." },
+  { mode:"retry_storm", fails:"consumer", alarm:"dlq-depth",
+    desc:"Handler always raises, so messages retry to the DLQ",
+    warn:"Fills the dead-letter queue. Purge it afterwards or the DLQ alarm " +
+         "stays lit." },
+];
 
 // ---- board -----------------------------------------------------------
 function cardHtml(i) {
@@ -342,11 +540,25 @@ function schedule(busy) {
   state.timer = setTimeout(() => load(true), busy ? 5000 : 20000);
 }
 
+// ---- drawers ---------------------------------------------------------
+// Two asides share one scrim, so the scrim is only hidden once neither is open.
+// Both are dismissed the same three ways: close chip, scrim, Escape.
+function syncScrim() {
+  const anyOpen = $("panel").classList.contains("open") ||
+                  $("howto").classList.contains("open");
+  $("scrim").classList.toggle("open", anyOpen);
+}
+
+function closeDrawers() {
+  if ($("howto").classList.contains("open")) { closeGuide(); return; }
+  if ($("panel").classList.contains("open")) closePanel();
+}
+
 // ---- detail panel ----------------------------------------------------
 function closePanel() {
   state.selected = null;
   $("panel").classList.remove("open");
-  $("scrim").classList.remove("open");
+  syncScrim();
   render();
 }
 
@@ -355,8 +567,9 @@ async function openPanel(id) {
   if (!i) return;
   state.selected = id;
   render();
+  $("howto").classList.remove("open");   // one drawer at a time
   $("panel").classList.add("open");
-  $("scrim").classList.add("open");
+  syncScrim();
 
   const conf = i.confidence == null ? "—" : Number(i.confidence).toFixed(2);
   // Surfaced deliberately: the evaluation found the agent is occasionally more
@@ -431,6 +644,374 @@ async function openPanel(id) {
   }
 }
 
+// ---- how to run ------------------------------------------------------
+// The only instructions a visitor will ever see. cli-reference.md is
+// gitignored (it holds a real token), so it cannot be the answer here.
+let run = { armed: null, since: null, timer: null };
+
+const TRAFFIC_DEFAULT = 5;
+
+function targetReady() {
+  return Boolean($("target").value.trim() && $("admin").value.trim());
+}
+
+function guideHtml() {
+  const ready = targetReady();
+
+  const options = MODES.map(m =>
+    `<option value="${esc(m.mode)}">${esc(m.mode)} — ${esc(m.desc)}</option>`).join("");
+
+  // Buttons exist either way; when unconfigured they are disabled and the
+  // reason is stated, which beats failing at fetch time with a CORS error.
+  const gate = ready ? "" : `<div class="needs-cfg">
+      The run controls need the <b>target app URL</b> and <b>admin token</b>.
+      Add them under <i>connection</i>.
+      <br><button class="go" id="g-open-cfg">Open connection settings</button>
+    </div>`;
+
+  const dis = ready ? "" : " disabled";
+
+  return `
+    <button class="chip close" id="g-x">close</button>
+    <h3>How to run this</h3>
+    <div class="id">break something on purpose, then watch it get diagnosed</div>
+
+    <section>
+      <h4>What happens</h4>
+      <ul class="flow">
+        <li>alarm</li><li>ingest</li><li>agent</li><li>approval</li><li>executor</li>
+      </ul>
+      <p>A CloudWatch alarm on the demo app raises an incident. An agent
+      investigates it with four read-only tools — logs, metrics, recent changes,
+      runbooks — and writes a root-cause analysis. Nothing is applied until a
+      human approves it on the board behind this panel.</p>
+      <p>The agent holds <b>no write permission</b> on anything it investigates.
+      That is enforced by IAM, not by asking the model nicely, so a wrong
+      conclusion produces a wrong <i>proposal</i> and never a wrong
+      <i>action</i>. Abstaining is a valid answer and is scored as one.</p>
+    </section>
+
+    <section>
+      <h4>Run it</h4>
+      ${gate}
+
+      <div class="step" id="g-step1">
+        <b>1 · Choose a failure</b>
+        <select id="g-mode">${options}</select>
+        <div class="hint" id="g-modehint"></div>
+      </div>
+
+      <div class="step" id="g-step2">
+        <b>2 · Arm it</b>
+        <div class="row">
+          <button class="go" id="g-arm"${dis}>Arm</button>
+          <button class="go" id="g-flags"${dis}>What's armed?</button>
+          <button class="go danger" id="g-disarm"${dis}>Disarm everything</button>
+        </div>
+        <div class="hint">Arming only writes a flag. Nothing has broken yet —
+        the fault fires on the next ordinary request, so the incident looks like
+        a real production failure rather than someone hitting a break endpoint.</div>
+        <div class="out" id="g-armout"></div>
+      </div>
+
+      <div class="step" id="g-step3">
+        <b>3 · Send traffic into it</b>
+        <div class="row">
+          <button class="go" id="g-traffic"${dis}>Send</button>
+          <input type="number" id="g-count" value="${TRAFFIC_DEFAULT}" min="1" max="25" style="width:64px">
+          <span class="hint" style="margin:0">orders</span>
+        </div>
+        <div class="out" id="g-trafout"></div>
+      </div>
+
+      <div class="step" id="g-step4">
+        <b>4 · Wait for the alarm</b>
+        <div class="hint">The alarm evaluates over a 60-second period and only
+        fires on a state <i>transition</i>, so expect the incident to appear on
+        the board in roughly 2–4 minutes. Investigation itself takes about a
+        minute.</div>
+        <div class="out" id="g-waitout"></div>
+      </div>
+
+      <div class="step" id="g-step5">
+        <b>5 · Decide</b>
+        <div class="hint">The incident lands in <b>Needs you</b> if the agent
+        proposes a remediation, or <b>Escalated</b> if it will not commit to
+        one. Open the card to read the evidence and the tool calls behind the
+        conclusion before approving.</div>
+      </div>
+    </section>
+
+    <section>
+      <h4>If nothing appears</h4>
+      <ul>
+        <li><b>Alarm actions may be disabled.</b> The evaluation sweep turns
+        them off so scenarios are not investigated twice; an end-to-end run
+        needs them on. Re-enable with
+        <code>aws cloudwatch enable-alarm-actions</code>.</li>
+        <li><b>The alarm may already be in ALARM.</b> It only publishes on a
+        transition, so a second run while it is still lit raises nothing.</li>
+        <li><b>Check what is armed.</b> A leftover mode from an earlier run is
+        the usual explanation for odd behaviour.</li>
+        <li>A mode self-disarms after its uses are spent, or after 15 minutes.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h4>The same thing from a terminal</h4>
+      <details>
+        <summary>PowerShell, if you would rather not use the buttons</summary>
+        <pre><code id="g-cli">${esc(cliSnippet())}</code></pre>
+        <button class="go" id="g-copy" style="margin-top:8px">Copy</button>
+      </details>
+    </section>`;
+}
+
+function cliSnippet() {
+  const url = $("target").value.trim().replace(/\/$/, "") || "<target app URL>";
+  const mode = $("g-mode")?.value || "exception";
+  const n = Number($("g-count")?.value) || TRAFFIC_DEFAULT;
+  return [
+    `$url   = "${url}"`,
+    `$admin = @{ "x-admin-token" = "<admin token>" }`,
+    ``,
+    `# arm a failure mode`,
+    `Invoke-RestMethod -Method Post -Uri "$url/admin/chaos/${mode}" -Headers $admin \``,
+    `  -Body '{"remaining":${n + 2},"ttl_seconds":900}' -ContentType application/json`,
+    ``,
+    `# drive ordinary traffic into it (errors here are the point)`,
+    `1..${n} | ForEach-Object {`,
+    `  try { Invoke-RestMethod -Method Post -Uri "$url/orders" \``,
+    `          -Body '{"item":"widget","quantity":1}' -ContentType application/json }`,
+    `  catch { "request failed: $($_.Exception.Response.StatusCode)" }`,
+    `  Start-Sleep -Milliseconds 300`,
+    `}`,
+    ``,
+    `# what is armed right now, and how to stop it`,
+    `Invoke-RestMethod -Uri "$url/admin/flags" -Headers $admin`,
+    `Invoke-RestMethod -Method Delete -Uri "$url/admin/chaos/${mode}" -Headers $admin`,
+  ].join("\n");
+}
+
+function modeHint() {
+  const m = MODES.find(x => x.mode === $("g-mode").value);
+  if (!m) return;
+  const bits = [`Fails in the <b>${esc(m.fails)}</b>, trips <code>${esc(m.alarm)}</code>.`];
+  if (m.note) bits.push(esc(m.note));
+  if (m.warn) bits.push(`<b>Leaves state behind:</b> ${esc(m.warn)}`);
+  $("g-modehint").innerHTML = bits.join(" ");
+  $("g-cli").textContent = cliSnippet();
+}
+
+async function armMode() {
+  const mode = $("g-mode").value;
+  const n = Number($("g-count").value) || TRAFFIC_DEFAULT;
+  const out = $("g-armout");
+  out.className = "out"; out.textContent = "Arming…";
+  try {
+    // remaining = traffic + 2, matching the evaluation harness: a couple spare
+    // so a retry does not exhaust the mode before the traffic burst finishes.
+    const r = await callTarget(`/admin/chaos/${encodeURIComponent(mode)}`, {
+      method:"POST", body: JSON.stringify({ remaining: n + 2, ttl_seconds: 900 }),
+    });
+    if (!r.ok) throw new Error(targetError(r));
+    run.armed = mode;
+    $("g-step2").classList.add("done");
+    out.className = "out ok";
+    out.textContent = `Armed ${mode}. Nothing has broken yet — send traffic to trigger it.`;
+  } catch (err) {
+    out.className = "out bad";
+    out.textContent = fetchHint(err);
+  }
+}
+
+async function driveTraffic() {
+  const n = Math.min(25, Math.max(1, Number($("g-count").value) || TRAFFIC_DEFAULT));
+  const out = $("g-trafout");
+  const btn = $("g-traffic");
+  btn.disabled = true;
+  out.className = "out";
+
+  let ok = 0, failed = 0;
+  for (let k = 0; k < n; k++) {
+    out.textContent = `Sending ${k + 1} of ${n}… ${ok} ok, ${failed} failed`;
+    try {
+      const r = await callTarget("/orders", {
+        method:"POST", body: JSON.stringify({ item:"widget", quantity:1 }),
+      });
+      r.ok ? ok++ : failed++;
+    } catch { failed++; }
+    if (k < n - 1) await new Promise(r => setTimeout(r, 300));
+  }
+
+  btn.disabled = false;
+  $("g-step3").classList.add("done");
+  const m = MODES.find(x => x.mode === run.armed);
+
+  // A failure count of zero is not necessarily a problem — three of the nine
+  // modes break the consumer or the latency metric while the API keeps
+  // answering 201. Saying "0 failed" without that context reads as "it did not
+  // work", which sends people looking for a bug that is not there.
+  let verdict, expected = true;
+  if (failed > 0) {
+    verdict = `${ok} ok, ${failed} failed — the fault fired.`;
+  } else if (m && m.fails === "consumer") {
+    verdict = `${ok} ok, 0 failed — expected for ${m.mode}: the API succeeds and ` +
+              `the consumer fails behind it, off the request path.`;
+  } else if (m && m.mode === "slow") {
+    verdict = `${ok} ok, 0 failed — expected for slow: requests succeed, just ` +
+              `late enough to breach the latency alarm.`;
+  } else {
+    verdict = `${ok} ok, 0 failed — nothing broke. Is a mode still armed?`;
+    expected = false;
+  }
+  out.className = "out" + (expected ? " ok" : " bad");
+  out.textContent = verdict;
+
+  startWaiting();
+}
+
+// Poll the board while the alarm makes up its mind, so the incident appears
+// without anyone reaching for Refresh.
+function startWaiting() {
+  clearInterval(run.timer);
+  run.since = Date.now();
+  if (!$("auto").checked) {
+    $("auto").checked = true;
+    store.setItem("gate_auto", "1");
+    load(true);
+  }
+  const tick = () => {
+    const s = Math.floor((Date.now() - run.since) / 1000);
+    const el = $("g-waitout");
+    if (!el) { clearInterval(run.timer); return; }
+    el.className = "out";
+    el.textContent = s < 240
+      ? `Waiting ${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s — ` +
+        `auto-refresh is on, the board updates itself.`
+      : `${Math.floor(s / 60)}m elapsed with nothing yet. Check that alarm ` +
+        `actions are enabled and that the alarm was not already in ALARM.`;
+    $("g-step4").classList.toggle("done", state.incidents.some(i =>
+      Number(i.triggered_at || 0) * 1000 > run.since - 60000));
+  };
+  tick();
+  run.timer = setInterval(tick, 1000);
+}
+
+async function showFlags() {
+  const out = $("g-armout");
+  out.className = "out"; out.textContent = "Checking…";
+  try {
+    const r = await callTarget("/admin/flags");
+    if (!r.ok) throw new Error(targetError(r));
+    // list_flags returns raw rows, including expired and exhausted ones, so
+    // report the fields that decide whether a flag will actually fire.
+    const live = (r.body.flags || []).filter(f => f.enabled &&
+      Number(f.remaining) > 0 && Number(f.expires_at) * 1000 > Date.now());
+    out.className = "out" + (live.length ? "" : " ok");
+    out.textContent = live.length
+      ? "Armed: " + live.map(f =>
+          `${f.name} (${f.remaining} uses left)`).join(", ")
+      : "Nothing armed.";
+  } catch (err) {
+    out.className = "out bad";
+    out.textContent = fetchHint(err);
+  }
+}
+
+async function disarmAll() {
+  const out = $("g-armout");
+  out.className = "out"; out.textContent = "Disarming…";
+  let failed = 0;
+  for (const m of MODES) {
+    try {
+      const r = await callTarget(`/admin/chaos/${m.mode}`, { method:"DELETE" });
+      if (!r.ok) failed++;
+    } catch { failed++; }
+  }
+  run.armed = null;
+  clearInterval(run.timer);
+  $("g-step2").classList.remove("done");
+  out.className = "out" + (failed ? " bad" : " ok");
+  out.textContent = failed
+    ? `${MODES.length - failed} of ${MODES.length} cleared; ${failed} failed.`
+    : "All modes disarmed.";
+}
+
+// A browser reports a blocked cross-origin request as an opaque "Failed to
+// fetch", which sends people hunting in the wrong place. Name the two causes
+// that actually produce it here.
+function fetchHint(err) {
+  const msg = String(err && err.message || err);
+  if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+    return "Could not reach the target app. Either its Function URL has no CORS " +
+           "configuration, or the URL is wrong. See infra/target_app.tf.";
+  }
+  return msg;
+}
+
+// The admin routes answer a bad token with a bare "forbidden", which does not
+// say which of the two plausible causes it is — and one of them is not about
+// the value you typed at all. Reaching this code at least proves CORS and the
+// Function URL's resource policy are working.
+function targetError(r) {
+  if (r.status === 403) {
+    return "403 forbidden — either the admin token is wrong, or ADMIN_TOKEN is " +
+           "unset on the target Lambda, which rejects every token. Check with: " +
+           "aws lambda get-function-configuration --function-name <api> " +
+           "--query Environment.Variables";
+  }
+  return r.body && r.body.error ? `${r.body.error} (HTTP ${r.status})` : "HTTP " + r.status;
+}
+
+function closeGuide() {
+  clearInterval(run.timer);
+  $("howto").classList.remove("open");
+  syncScrim();
+}
+
+function openGuide() {
+  $("panel").classList.remove("open");   // one drawer at a time
+  $("howto").innerHTML = guideHtml();
+  $("howto").classList.add("open");
+  syncScrim();
+
+  $("g-x").onclick = closeGuide;
+  $("g-mode").onchange = modeHint;
+  $("g-count").onchange = () => { $("g-cli").textContent = cliSnippet(); };
+  modeHint();
+
+  if (targetReady()) {
+    $("g-arm").onclick = armMode;
+    $("g-traffic").onclick = driveTraffic;
+    $("g-flags").onclick = showFlags;
+    $("g-disarm").onclick = disarmAll;
+  } else {
+    $("g-open-cfg").onclick = () => {
+      $("setup").classList.add("open");
+      closeGuide();
+      $("target").focus();
+    };
+  }
+
+  $("g-copy").onclick = async () => {
+    const text = $("g-cli").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      $("g-copy").textContent = "Copied";
+    } catch {
+      // clipboard needs a secure context, which file:// is not in every
+      // browser. Selecting the text is the honest fallback.
+      const r = document.createRange();
+      r.selectNodeContents($("g-cli"));
+      const sel = getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+      $("g-copy").textContent = "Selected — press Ctrl+C";
+    }
+    setTimeout(() => { $("g-copy").textContent = "Copy"; }, 2000);
+  };
+}
+
 // ---- actions ---------------------------------------------------------
 async function act(box, verb) {
   const id = box.dataset.id;
@@ -472,22 +1053,62 @@ function wire(root) {
 wire($("board"));
 wire($("panel"));
 
-$("scrim").onclick = closePanel;
-document.addEventListener("keydown", e => { if (e.key === "Escape") closePanel(); });
+$("scrim").onclick = closeDrawers;
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawers(); });
 $("refresh").onclick = () => load();
 $("cfg").onclick = () => $("setup").classList.toggle("open");
+$("guide").onclick = () =>
+  $("howto").classList.contains("open") ? closeGuide() : openGuide();
+$("theme").onclick = () =>
+  applyTheme(THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length]);
 $("auto").onchange = () => {
   store.setItem("gate_auto", $("auto").checked ? "1" : "");
   $("auto").checked ? load(true) : clearTimeout(state.timer);
 };
 
-// Restore between reloads. The token is a shared secret, not an identity, so
-// it lives no longer than the tab.
-$("url").value = store.getItem("gate_url") || "";
-$("token").value = store.getItem("gate_token") || "";
-$("auto").checked = store.getItem("gate_auto") === "1";
+// Rebuild the guide when the target app details change, so its buttons and CLI
+// snippet reflect what is configured without a reload.
+for (const id of ["target", "admin"]) {
+  $(id).onchange = () => { if ($("howto").classList.contains("open")) openGuide(); };
+}
 
-if ($("url").value && $("token").value) load();
-else { $("setup").classList.add("open"); $("board").innerHTML =
-  `<p class="none">Enter the gate URL and token above.</p>`; }
+// ---- bootstrap -------------------------------------------------------
+// config.json is deployed alongside this page and carries the two Function
+// URLs, so someone handed a link only has to paste the tokens. It holds no
+// secrets. Absent — opening this from disk, say — everything still works,
+// there is just nothing to prefill.
+async function loadConfig() {
+  try {
+    const res = await fetch("config.json", { cache: "no-store" });
+    return res.ok ? await res.json() : {};
+  } catch {
+    return {};                     // file:// throws here; not an error worth showing
+  }
+}
+
+async function init() {
+  applyTheme(currentTheme());
+
+  const cfg = await loadConfig();
+  // What the visitor typed beats what was deployed.
+  const pick = (key, ...fallbacks) =>
+    store.getItem(key) || fallbacks.find(Boolean) || "";
+
+  $("url").value    = pick("gate_url", cfg.approval_url);
+  $("token").value  = store.getItem("gate_token") || "";
+  $("target").value = pick("target_url", cfg.target_api_url);
+  $("admin").value  = store.getItem("admin_token") || "";
+  $("auto").checked = store.getItem("gate_auto") === "1";
+
+  if ($("url").value && $("token").value) { load(); return; }
+
+  // First visit: the old behaviour was an empty board and one line of text
+  // with nothing actionable on it. Open the instructions instead.
+  $("setup").classList.add("open");
+  $("board").innerHTML =
+    `<p class="none">Paste the approval token above to connect.</p>`;
+  openGuide();
+}
+
+init();
 </script>

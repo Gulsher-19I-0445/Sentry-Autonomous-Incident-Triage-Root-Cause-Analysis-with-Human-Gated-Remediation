@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Copy to config.json and deploy it alongside index.html. It prefills the two",
+    "endpoint URLs so someone handed a link only has to paste the tokens.",
+    "",
+    "Deliberately holds no secrets: this file is served publicly. The approval",
+    "token and the admin token stay out of it and are pasted by the visitor.",
+    "",
+    "  approval_url    terraform output -raw approval_url",
+    "  target_api_url  terraform output -raw target_api_url",
+    "",
+    "Both are Lambda Function URLs. The page works without this file, so opening",
+    "index.html straight from disk still behaves as it always did."
+  ],
+  "approval_url": "https://REPLACE-ME.lambda-url.us-east-1.on.aws",
+  "target_api_url": "https://REPLACE-ME.lambda-url.us-east-1.on.aws"
+}

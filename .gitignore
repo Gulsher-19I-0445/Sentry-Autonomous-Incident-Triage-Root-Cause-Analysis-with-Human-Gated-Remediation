@@ -65,6 +65,9 @@ build/
 
 # ---------------------------------------------------------------- frontend
 node_modules/
+# Deployed endpoint URLs — account-specific, though not secret. Keep the
+# .example, same as the tfvars rule above.
+frontend/config.json
 .next/
 .amplify/
 frontend/dist/
