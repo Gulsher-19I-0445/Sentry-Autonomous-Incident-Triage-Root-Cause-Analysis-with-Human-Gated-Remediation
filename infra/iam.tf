@@ -113,6 +113,16 @@ data "aws_iam_policy_document" "agent" {
   }
 
   statement {
+    sid = "ConsumeWorkQueue"
+    # The event source mapping polls on the function's behalf, so Lambda checks
+    # these at mapping-creation time: without them the mapping fails to create
+    # rather than failing at runtime. Read and delete only — the agent cannot
+    # enqueue work for itself.
+    actions   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+    resources = [aws_sqs_queue.work.arn]
+  }
+
+  statement {
     sid = "RecordFindings"
     # The one thing the agent may write, and only to its own incident record.
     # It cannot touch the application's data.

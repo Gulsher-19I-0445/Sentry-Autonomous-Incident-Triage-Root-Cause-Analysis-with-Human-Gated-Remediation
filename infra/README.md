@@ -110,6 +110,14 @@ your own and point them at the `alarms` SNS topic — the metric names and
 dimensions depend on the service. `dlq_queue_name` adds a queue-depth alarm,
 which is often the only signal that a consumer is failing silently.
 
+There are **two** topics, and picking the wrong one matters. `alarms` is the
+pipeline's input: ingest subscribes to it, so everything published there
+becomes an incident the agent investigates. `notify` reaches a human and
+nothing else, and is where the agent's own failure alarm goes — routing that
+one to `alarms` would have the agent investigate its own crashes. Setting
+`alarm_email` subscribes the address to both, so expect two confirmation
+emails.
+
 `app_flag_table` names a DynamoDB table whose feature flags the executor may
 turn **off**, never on. Leave it unset and that remediation is withheld
 entirely: the agent escalates to a human instead, which is the designed

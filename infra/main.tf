@@ -66,7 +66,7 @@ locals {
   name = { for component in [
     "api", "consumer", "ingest", "agent", "executor", "approval",
     "app", "incidents", "orders", "orders-dlq", "work", "work-dlq",
-    "alarms", "github",
+    "alarms", "notify", "github",
   ] : component => "${var.project_name}-${component}-${var.owner}" }
 
   lambda_prefix = "arn:${local.partition}:lambda:${local.region}:${local.account_id}:function"

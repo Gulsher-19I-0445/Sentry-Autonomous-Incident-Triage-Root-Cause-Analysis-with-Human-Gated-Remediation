@@ -144,6 +144,12 @@ resource "aws_lambda_function" "executor" {
     variables = merge(local.common_env, {
       APP_TABLE  = var.app_flag_table
       LIVE_ALIAS = "live"
+
+      # The executor's second guard: _resolve_function() matches the RCA's
+      # free-text affected_component against this list and refuses anything
+      # else. Without it the shared Config falls back to a hardcoded default,
+      # and the guard silently runs on another deployment's function names.
+      TARGET_FUNCTIONS = join(",", local.target_functions)
     })
   }
 
@@ -198,4 +204,17 @@ resource "aws_lambda_function_url" "approval" {
     allow_headers = ["content-type", "x-approval-token", "x-actor"]
     max_age       = 3600
   }
+}
+
+// Creating the URL does not make it reachable. The console adds this statement
+// for you; CreateFunctionUrlConfig, which is what Terraform calls, does not —
+// so without it every request is refused with 403 before the handler runs and
+// the token check never happens. auth_type NONE means "no IAM", not "no
+// resource policy".
+resource "aws_lambda_permission" "approval_url" {
+  statement_id           = "AllowFunctionURLInvoke"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.approval.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
 }

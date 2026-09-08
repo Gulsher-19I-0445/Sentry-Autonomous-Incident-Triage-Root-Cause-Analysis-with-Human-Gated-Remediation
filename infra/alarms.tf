@@ -99,8 +99,10 @@ resource "aws_cloudwatch_metric_alarm" "agent_failures" {
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching"
 
-  # Deliberately empty unless an email is configured. Routing this to the
-  # alarm topic would make the agent investigate its own crashes — a loop that
-  # is expensive, self-reinforcing, and hard to spot from the outside.
-  alarm_actions = var.alarm_email != "" ? [aws_sns_topic.alarms.arn] : []
+  # The notify topic, never the alarm topic. ingest subscribes to the latter,
+  # so routing this there would make the agent investigate its own crashes — a
+  # loop that is expensive, self-reinforcing, and hard to spot from the
+  # outside. With no alarm_email set the topic simply has no subscribers, so
+  # nobody is told; it still must not be the one that creates incidents.
+  alarm_actions = [aws_sns_topic.notify.arn]
 }

@@ -56,14 +56,42 @@ resource "aws_sqs_queue" "work" {
 }
 
 // --------------------------------------------------------------------------
-// alarm topic — CloudWatch to ingest
+// alarm topics — CloudWatch to ingest, and CloudWatch to a human
 // --------------------------------------------------------------------------
 
+// Two topics, and the split is the whole point of having two.
+//
+// `alarms` is the pipeline's INPUT: ingest subscribes to it, so anything
+// published here becomes an incident the agent investigates. `notify` reaches
+// a human and nothing else.
+//
+// The agent's own failure alarm must go to the second one. Pointing it at the
+// first would make the agent investigate its own crashes — a loop that is
+// expensive, self-reinforcing, and hard to spot from outside because each
+// investigation looks reasonable on its own. One topic cannot serve both
+// roles: subscribing a human to `alarms` is exactly what forced that alarm
+// onto the ingest path in the first place.
 resource "aws_sns_topic" "alarms" {
   name = local.name["alarms"]
 }
 
-data "aws_iam_policy_document" "alarms_topic" {
+resource "aws_sns_topic" "notify" {
+  name = local.name["notify"]
+}
+
+locals {
+  # Both topics are published to by CloudWatch and need the same policy.
+  # Written once so the SourceOwner condition cannot drift onto one and not
+  # the other.
+  alarm_topic_arns = {
+    alarms = aws_sns_topic.alarms.arn
+    notify = aws_sns_topic.notify.arn
+  }
+}
+
+data "aws_iam_policy_document" "alarm_topic" {
+  for_each = local.alarm_topic_arns
+
   statement {
     sid     = "AllowCloudWatchAlarms"
     actions = ["SNS:Publish"]
@@ -71,7 +99,7 @@ data "aws_iam_policy_document" "alarms_topic" {
       type        = "Service"
       identifiers = ["cloudwatch.amazonaws.com"]
     }
-    resources = [aws_sns_topic.alarms.arn]
+    resources = [each.value]
 
     # Without this, any account's alarms could publish here.
     condition {
@@ -82,9 +110,11 @@ data "aws_iam_policy_document" "alarms_topic" {
   }
 }
 
-resource "aws_sns_topic_policy" "alarms" {
-  arn    = aws_sns_topic.alarms.arn
-  policy = data.aws_iam_policy_document.alarms_topic.json
+resource "aws_sns_topic_policy" "alarm_topic" {
+  for_each = local.alarm_topic_arns
+
+  arn    = each.value
+  policy = data.aws_iam_policy_document.alarm_topic[each.key].json
 }
 
 resource "aws_sns_topic_subscription" "ingest" {
@@ -101,11 +131,13 @@ resource "aws_lambda_permission" "sns_invoke_ingest" {
   source_arn    = aws_sns_topic.alarms.arn
 }
 
-// Optional human notification. Subscription requires confirming an email, so
-// it stays "pending confirmation" until someone clicks the link.
+// Optional human notification, on BOTH topics: incidents worth a decision
+// arrive on `alarms`, agent failures on `notify`. Two subscriptions means two
+// confirmation emails, both of which have to be clicked.
 resource "aws_sns_topic_subscription" "email" {
-  count     = var.alarm_email != "" ? 1 : 0
-  topic_arn = aws_sns_topic.alarms.arn
+  for_each = var.alarm_email != "" ? local.alarm_topic_arns : {}
+
+  topic_arn = each.value
   protocol  = "email"
   endpoint  = var.alarm_email
 }
