@@ -160,7 +160,7 @@ someone hitting a `/break` endpoint.
 
 **Built and tested offline:** the target app and its fault injection, the alarm
 pipeline, ingest with dedup, the agent and its four tools, the approval gate,
-the executor, the operator dashboard, the eval harness and scoring, 479 unit
+the executor, the operator dashboard, the eval harness and scoring, 441 unit
 tests with CI, and a Terraform config describing the whole system.
 
 **Measured:** baseline of 15 investigations across 9 scenarios on 2026-09-03 —
@@ -185,6 +185,30 @@ system works". None of it is covered by the baseline.
 
 **Not started:** the write-up. Terraform now exists but has not replaced the
 console-built stack — it deploys a parallel one under a different `owner`.
+
+**The API function currently carries a deliberate defect** (2026-09-07). The
+bad-deploy demo needs a genuine one rather than an armed mode, so
+`Test-app-for-sentry` commit `9bfc0b6` adds `body["customer"]["tier"]` to
+`api/handler.py:91` and it is deployed. Every `POST /orders` raises
+`KeyError: 'customer'`, and because the Function URL is unqualified this holds
+for `$LATEST` regardless of where the `live` alias points. Push the clean bundle
+to `$LATEST` to get a healthy app back. Full runbook, replay mechanism and traps
+in `cli-reference.md`, "Bad-deploy demo".
+
+This is the first end-to-end run of the whole chain against a real deploy —
+alarm, agent, correct attribution to a real commit *and* the CloudTrail events
+behind it, approval, alias rollback. Two observations from it, neither yet
+measured properly:
+
+- With `exception` armed *and* the commit present, the agent attributed the
+  chaos failure to the innocent commit at 0.90 confidence. That coincidence was
+  manufactured — the commit subject was chosen to mirror the mode's `KeyError` —
+  so it is not a fair adversarial result. But the discriminator that would have
+  caught it was in its context: the trace was in `common/_internal.py`, and the
+  commit touched `api/handler.py`.
+- Confidence was 0.90 on both that wrong attribution and the correct one. n=2,
+  so it is an observation rather than a finding, but calibration is an axis the
+  scoring claims to measure and these two did not separate.
 
 ---
 
@@ -251,7 +275,7 @@ repeating anything before quoting it, but the concern did not materialise.
 
 ## Testing
 
-**321 unit tests in `tests/`, run with `python -m pytest`.** No AWS credentials,
+**441 unit tests in `tests/`, run with `python -m pytest`.** No AWS credentials,
 no network — `conftest.py` overrides credentials with fakes and blocks
 `socket.connect`, so a test that escapes stubbing fails loudly instead of
 quietly calling AWS. CI runs them on push (`.github/workflows/tests.yml`).
@@ -316,6 +340,9 @@ the real pipeline reacting to the same errors.
 | CI fails before running any test | `actions/setup-python` with `cache: pip` globs for `requirements.txt`/`pyproject.toml` and errors when neither exists — set `cache-dependency-path` |
 | two unrelated edits land in one commit | `git add <file>` stages the whole file; splitting them afterwards needs `reset --soft` and a temporary revert |
 | e2e run produces no investigation | the sweep pre-flight *disables* alarm actions — an end-to-end test needs them **enabled**, and the alarm still only fires on a transition |
+| agent sees no commits at all | the fine-grained PAT is not scoped to `GITHUB_REPO`. GitHub answers **404, not 401**, for a private repo a token cannot see, and `_fetch_commits` turns that into `[]` — indistinguishable from "nothing was committed". Splitting the repositories moved `GITHUB_REPO` without re-scoping the token |
+| rotating the GitHub token changes nothing | `_token_cache` is a module global set once per container; a warm agent keeps serving the old token. Force a cold start |
+| rollback succeeds but the errors continue | the Function URL is unqualified, so traffic runs `$LATEST` while the executor only moves the alias |
 
 ---
 

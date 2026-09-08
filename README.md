@@ -74,6 +74,28 @@ Then point the dashboard at it — see [infra/README.md](infra/README.md). Open
 `frontend/preview.html` first if you just want to see what it looks like; every
 endpoint in that build is faked, so it needs nothing deployed.
 
+`frontend/index.html` is one self-contained file and reads `config.json` from
+beside it, so hosting the real dashboard is a bucket with two objects. The
+config carries the two endpoint URLs and no secrets — tokens are pasted by
+whoever opens the page.
+
+## Seeing it work
+
+Three acts against a deployed stack, run in this order.
+
+1. **A bad deploy, caught and remediated.** A real commit, a real Lambda version
+   published minutes later, and a stack trace in the file that commit touched.
+   The agent correlates all three, distinguishes the change that shipped from
+   the change that merely exists, and proposes a rollback a human approves.
+2. **A real deploy that is innocent.** The same shape of evidence with nothing
+   actually wrong. The agent has to decline to blame it.
+3. **Knowing that it does not know.** A failure whose cause is swallowed before
+   it reaches a log. The agent escalates instead of guessing, and that is scored
+   as correct rather than as a miss.
+
+The order is the argument. Act 2 only lands because act 1 came first: the setup
+looks identical and the conclusion is the opposite.
+
 ## Tests
 
 ```bash
