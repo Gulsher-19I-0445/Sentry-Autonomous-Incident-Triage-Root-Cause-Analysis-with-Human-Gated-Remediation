@@ -14,10 +14,20 @@ $0.129 mean cost, 51 seconds. The scenario that matters most publishes a real
 deployment minutes before an alarm with nothing actually wrong; the agent
 answered "no change is implicated" three times out of three.
 
-```
-alarm -> SNS -> ingest (dedup) -> queue -> agent (4 read-only tools)
-      -> RCA -> approval gate -> executor
-```
+## Architecture
+
+![Sentry architecture](docs/architecture.svg)
+
+In one line: `alarm → SNS → ingest (dedup) → queue → agent (four read-only
+tools) → RCA → approval gate → executor`.
+
+The red path is the whole safety argument. It is the only edge in the diagram
+that writes anything, it starts at the one component holding write permissions,
+and it does not begin until a person has approved.
+
+Editable source: [docs/architecture.drawio](docs/architecture.drawio) — open it
+at [diagrams.net](https://app.diagrams.net) or with the Draw.io VS Code
+extension, and re-export `docs/architecture.svg` after any change.
 
 ## Layout
 

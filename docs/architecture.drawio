@@ -1,0 +1,142 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="sentry-architecture" name="Sentry architecture">
+    <mxGraphModel dx="1280" dy="710" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1280" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="Sentry — autonomous incident triage &amp;amp; RCA, behind a human gate" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#0F172A;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="620" height="26" as="geometry"/>
+        </mxCell>
+
+        <!-- application under observation -->
+        <mxCell id="appGroup" value="Application under observation&#10;separate repository, deployed by hand" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=6 4;fillColor=#FFFFFF;strokeColor=#94A3B8;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=11;fontStyle=1;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="340" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="api" value="API Lambda&#10;accepts orders" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#60A5FA;fontColor=#1E3A5F;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="132" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="orders" value="Orders queue&#10;SQS + DLQ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;fontColor=#1F2937;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="220" y="132" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="consumer" value="Consumer Lambda&#10;processes messages" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#60A5FA;fontColor=#1E3A5F;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="212" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="appTable" value="App table&#10;DynamoDB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;fontColor=#1F2937;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="220" y="212" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-api-orders" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="api" target="orders"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-orders-consumer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="orders" target="consumer"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-consumer-table" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="consumer" target="appTable"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- evidence -->
+        <mxCell id="evGroup" value="Evidence — read-only" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=6 4;fillColor=#F0FDF4;strokeColor=#22C55E;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=11;fontStyle=1;fontColor=#15803D;" vertex="1" parent="1">
+          <mxGeometry x="40" y="380" width="340" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="evLogs" value="CloudWatch Logs Insights&#10;allow-listed log groups only, query built in code" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;fontColor=#14532D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="424" width="300" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="evMetrics" value="CloudWatch metrics&#10;error rate vs traffic, computed before the model sees it" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;fontColor=#14532D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="480" width="300" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="evTrail" value="CloudTrail&#10;filtered to the target app, Sentry's own deploys excluded" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;fontColor=#14532D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="536" width="300" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="evGithub" value="GitHub&#10;commit subjects + the file paths each one touched" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;fontColor=#14532D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="592" width="300" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-app-ev" value="emits logs · metrics · events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#94A3B8;fontSize=9;fontColor=#64748B;" edge="1" parent="1" source="appGroup" target="evGroup"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- pipeline -->
+        <mxCell id="alarms" value="CloudWatch alarms&#10;publish on a state transition only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#F59E0B;fontColor=#713F12;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="470" y="95" width="270" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="sns" value="SNS topic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#F59E0B;fontColor=#713F12;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="470" y="170" width="270" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingest" value="Ingest Lambda&#10;dedup key = alarm + 5-minute bucket&#10;conditional write, first writer wins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#8B5CF6;fontColor=#3B0764;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="470" y="240" width="270" height="62" as="geometry"/>
+        </mxCell>
+        <mxCell id="workq" value="Work queue&#10;SQS + DLQ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;fontColor=#1F2937;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="470" y="355" width="270" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="agent" value="Agent Lambda&#10;Converse tool-use loop, at most 8 steps&#10;four read-only tools, window fixed by the incident&#10;no write permission on anything it investigates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#8B5CF6;strokeWidth=1.5;fontColor=#3B0764;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="450" y="425" width="310" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="bedrock" value="Amazon Bedrock&#10;Claude Sonnet 5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCFBF1;strokeColor=#14B8A6;fontColor=#134E4A;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="490" y="620" width="230" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e-app-alarms" value="metrics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;fontSize=9;fontColor=#64748B;" edge="1" parent="1" source="appGroup" target="alarms"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-alarms-sns" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="alarms" target="sns"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-sns-ingest" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="sns" target="ingest"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-ingest-workq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="ingest" target="workq"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-workq-agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="workq" target="agent"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-agent-bedrock" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;startArrow=classic;startFill=1;" edge="1" parent="1" source="agent" target="bedrock"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-ev-agent" value="read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#16A34A;fontSize=9;fontColor=#15803D;" edge="1" parent="1" source="evGroup" target="agent"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- incident store -->
+        <mxCell id="incidents" value="Incidents table&#10;DynamoDB&#10;&#10;NEW → INVESTIGATING&#10;→ PENDING_APPROVAL&#10;→ APPROVED → EXECUTED&#10;→ CLOSED&#10;&#10;or ESCALATED /&#10;INFORMATIONAL / FAILED&#10;&#10;every transition is an atomic&#10;conditional update" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E2E8F0;strokeColor=#64748B;strokeWidth=1.5;fontColor=#1F2937;fontSize=10;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="810" y="240" width="200" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-ingest-inc" value="create" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;fontSize=9;fontColor=#64748B;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.11;entryDx=0;entryDy=0;" edge="1" parent="1" source="ingest" target="incidents"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-agent-inc" value="RCA" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;startArrow=classic;startFill=1;fontSize=9;fontColor=#64748B;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.84;entryDx=0;entryDy=0;" edge="1" parent="1" source="agent" target="incidents"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- decide and act -->
+        <mxCell id="human" value="Human operator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#64748B;fontColor=#0F172A;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="90" width="180" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="dashboard" value="Operator dashboard&#10;static page on S3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#64748B;fontColor=#0F172A;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="160" width="180" height="52" as="geometry"/>
+        </mxCell>
+        <mxCell id="approval" value="Approval Lambda&#10;list · inspect&#10;approve · reject" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE9FE;strokeColor=#8B5CF6;fontColor=#3B0764;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="245" width="180" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="executor" value="Executor Lambda&#10;the only component in&#10;the system that mutates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEE2E2;strokeColor=#EF4444;strokeWidth=1.5;fontColor=#7F1D1D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="340" width="180" height="62" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e-human-dash" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="human" target="dashboard"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-dash-approval" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;" edge="1" parent="1" source="dashboard" target="approval"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-approval-inc" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;startArrow=classic;startFill=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.124;entryDx=0;entryDy=0;" edge="1" parent="1" source="approval" target="incidents"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-approval-exec" value="on approve" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;fontSize=9;fontColor=#64748B;" edge="1" parent="1" source="approval" target="executor"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-exec-inc" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#475569;startArrow=classic;startFill=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.476;entryDx=0;entryDy=0;" edge="1" parent="1" source="executor" target="incidents"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- the write path -->
+        <mxCell id="e-write" value="alias shift  |  feature flag&#10;the only write path in the system — and only after a human approves" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#EF4444;strokeWidth=2.5;fontSize=10;fontColor=#B91C1C;fontStyle=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.62;entryDx=0;entryDy=0;verticalAlign=bottom;" edge="1" parent="1" source="executor" target="appGroup">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1160" y="560"/>
+              <mxPoint x="418" y="560"/>
+              <mxPoint x="418" y="225"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- legend -->
+        <mxCell id="legendBox" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CBD5E1;" vertex="1" parent="1">
+          <mxGeometry x="770" y="592" width="470" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg1" value="" style="endArrow=classic;html=1;strokeColor=#475569;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="786" y="613" as="sourcePoint"/><mxPoint x="822" y="613" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="lg1t" value="control and data flow" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="834" y="602" width="330" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg2" value="" style="endArrow=classic;html=1;dashed=1;strokeColor=#16A34A;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="786" y="637" as="sourcePoint"/><mxPoint x="822" y="637" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="lg2t" value="read-only evidence — the agent can look, never touch" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="834" y="626" width="330" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg3" value="" style="endArrow=classic;html=1;strokeColor=#EF4444;strokeWidth=2.5;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="786" y="661" as="sourcePoint"/><mxPoint x="822" y="661" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="lg3t" value="mutation — executor only, after human approval" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontColor=#334155;" vertex="1" parent="1">
+          <mxGeometry x="834" y="650" width="330" height="20" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

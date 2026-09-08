@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 710" width="1280" height="710" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="aGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a"/>
+    </marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="710" fill="#f6f8fa"/>
+  <text x="40" y="36" font-size="16" font-weight="600" fill="#0f172a">Sentry — autonomous incident triage &amp; RCA, behind a human gate</text>
+
+  <!-- ============ application under observation ============ -->
+  <rect x="40" y="70" width="340" height="250" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="58" y="96" font-size="12" font-weight="600" fill="#475569">Application under observation</text>
+  <text x="58" y="112" font-size="10" fill="#64748b">separate repository, deployed by hand</text>
+
+  <rect x="60" y="132" width="140" height="50" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="130" y="155" font-size="11" font-weight="600" text-anchor="middle" fill="#1e3a5f">API Lambda</text>
+  <text x="130" y="170" font-size="9" text-anchor="middle" fill="#3b5f8a">accepts orders</text>
+
+  <rect x="220" y="132" width="140" height="50" rx="6" fill="#e2e8f0" stroke="#64748b"/>
+  <text x="290" y="155" font-size="11" font-weight="600" text-anchor="middle" fill="#1f2937">Orders queue</text>
+  <text x="290" y="170" font-size="9" text-anchor="middle" fill="#475569">SQS + DLQ</text>
+
+  <rect x="60" y="212" width="140" height="50" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="130" y="235" font-size="11" font-weight="600" text-anchor="middle" fill="#1e3a5f">Consumer Lambda</text>
+  <text x="130" y="250" font-size="9" text-anchor="middle" fill="#3b5f8a">processes messages</text>
+
+  <rect x="220" y="212" width="140" height="50" rx="6" fill="#e2e8f0" stroke="#64748b"/>
+  <text x="290" y="235" font-size="11" font-weight="600" text-anchor="middle" fill="#1f2937">App table</text>
+  <text x="290" y="250" font-size="9" text-anchor="middle" fill="#475569">DynamoDB</text>
+
+  <path d="M 200 157 L 214 157" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 290 182 L 290 197 L 130 197 L 130 206" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 200 237 L 214 237" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+
+  <!-- ============ evidence ============ -->
+  <rect x="40" y="380" width="340" height="270" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="58" y="406" font-size="12" font-weight="600" fill="#15803d">Evidence — read-only</text>
+
+  <rect x="60" y="424" width="300" height="46" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="210" y="443" font-size="11" font-weight="600" text-anchor="middle" fill="#14532d">CloudWatch Logs Insights</text>
+  <text x="210" y="458" font-size="9" text-anchor="middle" fill="#15803d">allow-listed log groups only, query built in code</text>
+
+  <rect x="60" y="480" width="300" height="46" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="210" y="499" font-size="11" font-weight="600" text-anchor="middle" fill="#14532d">CloudWatch metrics</text>
+  <text x="210" y="514" font-size="9" text-anchor="middle" fill="#15803d">error rate vs traffic, computed before the model sees it</text>
+
+  <rect x="60" y="536" width="300" height="46" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="210" y="555" font-size="11" font-weight="600" text-anchor="middle" fill="#14532d">CloudTrail</text>
+  <text x="210" y="570" font-size="9" text-anchor="middle" fill="#15803d">filtered to the target app, Sentry's own deploys excluded</text>
+
+  <rect x="60" y="592" width="300" height="46" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="210" y="611" font-size="11" font-weight="600" text-anchor="middle" fill="#14532d">GitHub</text>
+  <text x="210" y="626" font-size="9" text-anchor="middle" fill="#15803d">commit subjects + the file paths each one touched</text>
+
+  <path d="M 210 322 L 210 374" stroke="#94a3b8" fill="none" stroke-dasharray="4 3" marker-end="url(#aGrey)"/>
+  <text x="222" y="343" font-size="9" fill="#64748b">emits</text>
+  <text x="222" y="356" font-size="9" fill="#64748b">logs · metrics · events</text>
+
+  <!-- ============ pipeline ============ -->
+  <rect x="470" y="95" width="270" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="605" y="117" font-size="11" font-weight="600" text-anchor="middle" fill="#713f12">CloudWatch alarms</text>
+  <text x="605" y="133" font-size="9" text-anchor="middle" fill="#92400e">publish on a state transition only</text>
+
+  <rect x="470" y="170" width="270" height="44" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="605" y="197" font-size="11" font-weight="600" text-anchor="middle" fill="#713f12">SNS topic</text>
+
+  <rect x="470" y="240" width="270" height="62" rx="6" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="605" y="261" font-size="11" font-weight="600" text-anchor="middle" fill="#3b0764">Ingest Lambda</text>
+  <text x="605" y="277" font-size="9" text-anchor="middle" fill="#5b21b6">dedup key = alarm + 5-minute bucket</text>
+  <text x="605" y="291" font-size="9" text-anchor="middle" fill="#5b21b6">conditional write, first writer wins</text>
+
+  <rect x="470" y="355" width="270" height="46" rx="6" fill="#e2e8f0" stroke="#64748b"/>
+  <text x="605" y="375" font-size="11" font-weight="600" text-anchor="middle" fill="#1f2937">Work queue</text>
+  <text x="605" y="390" font-size="9" text-anchor="middle" fill="#475569">SQS + DLQ</text>
+
+  <rect x="450" y="425" width="310" height="90" rx="6" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="605" y="450" font-size="12" font-weight="600" text-anchor="middle" fill="#3b0764">Agent Lambda</text>
+  <text x="605" y="468" font-size="9" text-anchor="middle" fill="#5b21b6">Converse tool-use loop, at most 8 steps</text>
+  <text x="605" y="483" font-size="9" text-anchor="middle" fill="#5b21b6">four read-only tools, window fixed by the incident</text>
+  <text x="605" y="501" font-size="9" font-weight="600" text-anchor="middle" fill="#7f1d1d">no write permission on anything it investigates</text>
+
+  <rect x="490" y="620" width="230" height="50" rx="6" fill="#ccfbf1" stroke="#14b8a6"/>
+  <text x="605" y="641" font-size="11" font-weight="600" text-anchor="middle" fill="#134e4a">Amazon Bedrock</text>
+  <text x="605" y="657" font-size="9" text-anchor="middle" fill="#0f766e">Claude Sonnet 5</text>
+
+  <path d="M 382 140 L 464 122" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <text x="424" y="150" font-size="9" text-anchor="middle" fill="#64748b">metrics</text>
+  <path d="M 605 145 L 605 166" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 605 214 L 605 236" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 605 302 L 605 351" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 605 401 L 605 421" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 605 515 L 605 616" stroke="#475569" fill="none" marker-start="url(#aGrey)" marker-end="url(#aGrey)"/>
+  <path d="M 382 498 L 442 477" stroke="#16a34a" fill="none" stroke-dasharray="4 3" marker-end="url(#aGreen)"/>
+
+  <!-- ============ incident store ============ -->
+  <rect x="810" y="240" width="200" height="275" rx="8" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <text x="910" y="268" font-size="11" font-weight="600" text-anchor="middle" fill="#1f2937">Incidents table</text>
+  <text x="910" y="283" font-size="9" text-anchor="middle" fill="#475569">DynamoDB</text>
+  <text x="910" y="311" font-size="10" text-anchor="middle" fill="#1f2937">NEW → INVESTIGATING</text>
+  <text x="910" y="329" font-size="10" text-anchor="middle" fill="#1f2937">→ PENDING_APPROVAL</text>
+  <text x="910" y="347" font-size="10" text-anchor="middle" fill="#1f2937">→ APPROVED → EXECUTED</text>
+  <text x="910" y="365" font-size="10" text-anchor="middle" fill="#1f2937">→ CLOSED</text>
+  <text x="910" y="391" font-size="10" text-anchor="middle" fill="#475569">or ESCALATED /</text>
+  <text x="910" y="407" font-size="10" text-anchor="middle" fill="#475569">INFORMATIONAL / FAILED</text>
+  <text x="910" y="437" font-size="9" text-anchor="middle" fill="#64748b" font-style="italic">every transition is an atomic</text>
+  <text x="910" y="451" font-size="9" text-anchor="middle" fill="#64748b" font-style="italic">conditional update</text>
+
+  <path d="M 742 271 L 804 271" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <text x="773" y="264" font-size="9" text-anchor="middle" fill="#64748b">create</text>
+  <path d="M 762 470 L 804 470" stroke="#475569" fill="none" marker-start="url(#aGrey)" marker-end="url(#aGrey)"/>
+  <text x="783" y="463" font-size="9" text-anchor="middle" fill="#64748b">RCA</text>
+
+  <!-- ============ decide and act ============ -->
+  <rect x="1070" y="90" width="180" height="44" rx="6" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="1160" y="117" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Human operator</text>
+
+  <rect x="1070" y="160" width="180" height="52" rx="6" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="1160" y="182" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Operator dashboard</text>
+  <text x="1160" y="197" font-size="9" text-anchor="middle" fill="#475569">static page on S3</text>
+
+  <rect x="1070" y="245" width="180" height="58" rx="6" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="1160" y="266" font-size="11" font-weight="600" text-anchor="middle" fill="#3b0764">Approval Lambda</text>
+  <text x="1160" y="281" font-size="9" text-anchor="middle" fill="#5b21b6">list · inspect</text>
+  <text x="1160" y="295" font-size="9" text-anchor="middle" fill="#5b21b6">approve · reject</text>
+
+  <rect x="1070" y="340" width="180" height="62" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="1160" y="362" font-size="11" font-weight="600" text-anchor="middle" fill="#7f1d1d">Executor Lambda</text>
+  <text x="1160" y="377" font-size="9" text-anchor="middle" fill="#991b1b">the only component in</text>
+  <text x="1160" y="391" font-size="9" text-anchor="middle" fill="#991b1b">the system that mutates</text>
+
+  <path d="M 1160 134 L 1160 156" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 1160 212 L 1160 241" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <path d="M 1066 274 L 1014 274" stroke="#475569" fill="none" marker-start="url(#aGrey)" marker-end="url(#aGrey)"/>
+  <path d="M 1160 303 L 1160 336" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <text x="1152" y="324" font-size="9" text-anchor="end" fill="#64748b">on approve</text>
+  <path d="M 1066 371 L 1014 371" stroke="#475569" fill="none" marker-start="url(#aGrey)" marker-end="url(#aGrey)"/>
+
+  <!-- ============ the write path ============ -->
+  <path d="M 1160 402 L 1160 560 L 418 560 L 418 225 L 388 225"
+        stroke="#ef4444" stroke-width="2.5" fill="none" marker-end="url(#aRed)"/>
+  <text x="790" y="551" font-size="11" font-weight="600" text-anchor="middle" fill="#b91c1c">alias shift  |  feature flag</text>
+  <text x="790" y="577" font-size="10" text-anchor="middle" fill="#7f1d1d">the only write path in the system — and only after a human approves</text>
+
+  <!-- ============ legend ============ -->
+  <rect x="770" y="592" width="470" height="78" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <path d="M 786 613 L 822 613" stroke="#475569" fill="none" marker-end="url(#aGrey)"/>
+  <text x="836" y="617" font-size="10" fill="#334155">control and data flow</text>
+  <path d="M 786 637 L 822 637" stroke="#16a34a" fill="none" stroke-dasharray="4 3" marker-end="url(#aGreen)"/>
+  <text x="836" y="641" font-size="10" fill="#334155">read-only evidence — the agent can look, never touch</text>
+  <path d="M 786 661 L 822 661" stroke="#ef4444" stroke-width="2.5" fill="none" marker-end="url(#aRed)"/>
+  <text x="836" y="665" font-size="10" fill="#334155">mutation — executor only, after human approval</text>
+</svg>
