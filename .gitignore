@@ -5,7 +5,17 @@ ziptest/
 resources.txt
 manual-setup.md
 cli-reference.md
+# The demo runbook assumes the variables and helper functions defined at the
+# top of cli-reference.md, so it is no more use to a reader than that file is.
+DEMO.md
 e2e_run.json
+
+# ------------------------------------------------------- local-only documents
+# Working notes and submission artefacts. Neither is source, and neither is
+# something a reader of this repository needs.
+session.md
+session-*.md
+Sentry-Capstone-Proposal.pdf
 # ---------------------------------------------------------------- terraform
 **/.terraform/
 **/.terraform.lock.hcl
@@ -31,6 +41,10 @@ local-config.*
 # ---------------------------------------------------------------- eval output
 # Raw sweep output. Comment this out once you are producing results worth
 # keeping for the report — they are the raw data for the calibration analysis.
+# Every sweep writes evals/eval-<label>.json; the older runs used
+# eval-results*.json at the repo root. Both shapes are ignored, so a new label
+# is covered without anyone remembering to add it.
+evals/eval-*.json
 eval-results.json
 eval-results-*.json
 evals/fixtures/*.local.json
