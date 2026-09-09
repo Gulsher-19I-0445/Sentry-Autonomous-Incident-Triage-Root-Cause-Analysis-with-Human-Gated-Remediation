@@ -16,7 +16,7 @@ answered "no change is implicated" three times out of three.
 
 ## Architecture
 
-![Sentry architecture](docs/architecture.svg)
+![Sentry architecture](docs/architecture.png)
 
 In one line: `alarm → SNS → ingest (dedup) → queue → agent (four read-only
 tools) → RCA → approval gate → executor`.
@@ -27,7 +27,8 @@ and it does not begin until a person has approved.
 
 Editable source: [docs/architecture.drawio](docs/architecture.drawio) — open it
 at [diagrams.net](https://app.diagrams.net) or with the Draw.io VS Code
-extension, and re-export `docs/architecture.svg` after any change.
+extension, and re-export `docs/architecture.png` after any change. The PNG is
+exported with the diagram embedded in it, so it opens in draw.io too.
 
 ## Layout
 
